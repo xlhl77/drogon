@@ -338,7 +338,7 @@ bool MysqlConnection::onEventPrepareStart()
 {
     int err;
 
-    _stmtPtr = std::make_shared<MYSQL_STMT>(mysql_stmt_init(_mysqlPtr.get()));
+    _stmtPtr = std::shared_ptr<MYSQL_STMT>(mysql_stmt_init(_mysqlPtr.get()));
     
     _waitStatus = mysql_stmt_prepare_start(&err, _stmtPtr.get(), _sql.c_str(), _sql.length());
     LOG_TRACE << "stmt_prepare_start:" << _waitStatus;
