@@ -303,7 +303,7 @@ void MysqlConnection::getResult()
     // mysql_stmt_affected_rows(_stmtPtr.get()), mysql_stmt_insert_id(_stmtPtr.get()));
     if (_isWorking)
     {
-        _cb(*(_resultPtr.get()));
+        _cb(Result(_resultPtr));
         _cb = nullptr;
         _exceptCb = nullptr;
         _isWorking = false;
@@ -427,7 +427,7 @@ bool MysqlConnection::onEventResultStart()
         mysql_free_result(r);
     });
 
-    _resultPtr = makeResult(resultPtr, _sql);
+    _resultPtr = new MysqlResultImpl(resultPtr, _sql);
     mysql_stmt_bind_result(_stmtPtr.get(), _resultPtr->getBinds());
 
     int err;
