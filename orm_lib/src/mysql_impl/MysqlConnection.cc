@@ -13,7 +13,6 @@
  */
 
 #include "MysqlConnection.h"
-#include "MysqlResultImpl.h"
 #include <drogon/utils/Utilities.h>
 #include <regex>
 #include <algorithm>
@@ -40,6 +39,9 @@ MysqlConnection::MysqlConnection(trantor::EventLoop *loop, const std::string &co
     : DbConnection(loop),
       _mysqlPtr(std::shared_ptr<MYSQL>(new MYSQL, [](MYSQL *p) {
           mysql_close(p);
+      })),
+      _stmtPtr(std::shared_ptr<MYSQL_STMT>(new MYSQL_STMT, [](MYSQL_STMT *p {
+          mysql_stmt_close(p);
       }))
 {
     mysql_init(_mysqlPtr.get());
@@ -168,26 +170,10 @@ void MysqlConnection::handleTimeout()
     LOG_TRACE << "channel index:" << _channelPtr->index();
     int status = 0;
     status |= MYSQL_WAIT_TIMEOUT;
-    MYSQL *ret;
+
     if (_status == ConnectStatus_Connecting)
     {
-        _waitStatus = mysql_real_connect_cont(&ret, _mysqlPtr.get(), status);
-        if (_waitStatus == 0)
-        {
-            if (!ret)
-            {
-                handleClosed();
-                LOG_ERROR << "Failed to mysql_real_connect()";
-                return;
-            }
-            //I don't think the programe can run to here.
-            _status = ConnectStatus_Ok;
-            if (_okCb)
-            {
-                auto thisPtr = shared_from_this();
-                _okCb(thisPtr);
-            }
-        }
+        if (!onEventConnect(status))
         setChannel();
     }
     else if (_status == ConnectStatus_Ok)
@@ -207,84 +193,39 @@ void MysqlConnection::handleEvent()
     status = (status & _waitStatus);
     if (status == 0)
         return;
-    MYSQL *ret;
     if (_status == ConnectStatus_Connecting)
     {
-        _waitStatus = mysql_real_connect_cont(&ret, _mysqlPtr.get(), status);
-        if (_waitStatus == 0)
-        {
-            if (!ret)
-            {
-                handleClosed();
-                //perror("");
-                LOG_ERROR << "Failed to mysql_real_connect()";
-                return;
-            }
-            _status = ConnectStatus_Ok;
-            if (_okCb)
-            {
-                auto thisPtr = shared_from_this();
-                _okCb(thisPtr);
-            }
-        }
+        if (!onEventConnect(status)) return;
         setChannel();
     }
     else if (_status == ConnectStatus_Ok)
     {
         switch (_execStatus)
         {
-        case ExecStatus_RealQuery:
+        case ExecStatus_Prepare:
         {
-            int err = 0;
-            _waitStatus = mysql_real_query_cont(&err, _mysqlPtr.get(), status);
-            LOG_TRACE << "real_query:" << _waitStatus;
-            if (_waitStatus == 0)
-            {
-                if (err)
-                {
-                    _execStatus = ExecStatus_None;
-                    LOG_ERROR << "error:" << err << " status:" << status;
-                    outputError();
-                    return;
-                }
-                _execStatus = ExecStatus_StoreResult;
-                MYSQL_RES *ret;
-                _waitStatus = mysql_store_result_start(&ret, _mysqlPtr.get());
-                LOG_TRACE << "store_result_start:" << _waitStatus;
-                if (_waitStatus == 0)
-                {
-                    _execStatus = ExecStatus_None;
-                    if (err)
-                    {
-                        LOG_ERROR << "error";
-                        outputError();
-                        return;
-                    }
-                    getResult(ret);
-                }
-            }
+            if (!onEventPrepare(status)) return;
+            setChannel();
+            break;
+        }
+        case ExecStatus_Execute:
+        {
+            if (!onEventExecute(status)) return;
             setChannel();
             break;
         }
         case ExecStatus_StoreResult:
         {
-            MYSQL_RES *ret;
-            _waitStatus = mysql_store_result_cont(&ret, _mysqlPtr.get(), status);
-            LOG_TRACE << "store_result:" << _waitStatus;
-            if (_waitStatus == 0)
-            {
-                if (!ret)
-                {
-                    _execStatus = ExecStatus_None;
-                    LOG_ERROR << "error";
-                    outputError();
-                    return;
-                }
-                getResult(ret);
-            }
+            if (!onEventResult(status)) return;
             setChannel();
             break;
         }
+        case ExecStatus_FetchRow:
+        {
+            if (!onEventFetchRow(status)) return;
+            setChannel();
+            break;
+        }        
         case ExecStatus_None:
         {
             //Connection closed!
@@ -317,96 +258,15 @@ void MysqlConnection::execSqlInLoop(std::string &&sql,
     _cb = std::move(rcb);
     _isWorking = true;
     _exceptCb = std::move(exceptCallback);
-    _sql.clear();
-    if (paraNum > 0)
-    {
-        std::string::size_type pos = 0;
-        std::string::size_type seekPos = std::string::npos;
-        for (size_t i = 0; i < paraNum; i++)
-        {
-            seekPos = sql.find("?", pos);
-            if (seekPos == std::string::npos)
-            {
-                _sql.append(sql.substr(pos));
-                pos = seekPos;
-                break;
-            }
-            else
-            {
-                _sql.append(sql.substr(pos, seekPos - pos));
-                pos = seekPos + 1;
-                switch (format[i])
-                {
-                case MYSQL_TYPE_TINY:
-                    _sql.append(std::to_string(*((char *)parameters[i])));
-                    break;
-                case MYSQL_TYPE_SHORT:
-                    _sql.append(std::to_string(*((short *)parameters[i])));
-                    break;
-                case MYSQL_TYPE_LONG:
-                    _sql.append(std::to_string(*((int32_t *)parameters[i])));
-                    break;
-                case MYSQL_TYPE_LONGLONG:
-                    _sql.append(std::to_string(*((int64_t *)parameters[i])));
-                    break;
-                case MYSQL_TYPE_NULL:
-                    _sql.append("NULL");
-                    break;
-                case MYSQL_TYPE_STRING:
-                {
-                    _sql.append("'");
-                    std::string to(length[i] * 2, '\0');
-                    auto len = mysql_real_escape_string(_mysqlPtr.get(), (char *)to.c_str(), parameters[i], length[i]);
-                    to.resize(len);
-                    _sql.append(to);
-                    _sql.append("'");
-                }
-                break;
-                default:
-                    break;
-                }
-            }
-        }
-        if (pos < sql.length())
-        {
-            _sql.append(sql.substr(pos));
-        }
-    }
-    else
-    {
-        _sql = sql;
-    }
-    LOG_TRACE << _sql;
-    int err;
-    //int mysql_real_query_start(int *ret, MYSQL *mysql, const char *q, unsigned long length)
-    _waitStatus = mysql_real_query_start(&err, _mysqlPtr.get(), _sql.c_str(), _sql.length());
-    LOG_TRACE << "real_query:" << _waitStatus;
-    _execStatus = ExecStatus_RealQuery;
-    if (_waitStatus == 0)
-    {
-        if (err)
-        {
-            LOG_ERROR << "error";
-            outputError();
-            return;
-        }
+    _sql = sql;
 
-        MYSQL_RES *ret;
-        _waitStatus = mysql_store_result_start(&ret, _mysqlPtr.get());
-        LOG_TRACE << "store_result:" << _waitStatus;
-        _execStatus = ExecStatus_StoreResult;
-        if (_waitStatus == 0)
-        {
-            _execStatus = ExecStatus_None;
-            if (!ret)
-            {
-                LOG_ERROR << "error";
-                outputError();
-                return;
-            }
-            getResult(ret);
-        }
-    }
+    LOG_TRACE << _sql;
+
+    // 生成参数绑定
+    for(auto i = 0; i< paraNum; i++)
+        bind_param(parameters.at(i), i, format[i], length[i]);
+
+    if (!onEventPrepareStart()) return;
     setChannel();
     return;
 }
@@ -438,18 +298,246 @@ void MysqlConnection::outputError()
     }
 }
 
-void MysqlConnection::getResult(MYSQL_RES *res)
+void MysqlConnection::getResult()
 {
-    auto resultPtr = std::shared_ptr<MYSQL_RES>(res, [](MYSQL_RES *r) {
-        mysql_free_result(r);
-    });
-    auto Result = makeResult(resultPtr, _sql, mysql_affected_rows(_mysqlPtr.get()), mysql_insert_id(_mysqlPtr.get()));
+    // mysql_stmt_affected_rows(_stmtPtr.get()), mysql_stmt_insert_id(_stmtPtr.get()));
     if (_isWorking)
     {
-        _cb(Result);
+        _cb(_resultPtr);
         _cb = nullptr;
         _exceptCb = nullptr;
         _isWorking = false;
         _idleCb();
     }
+}
+
+bool MysqlConnection::onEventConnect(int status)
+{
+    MYSQL *ret;
+    _waitStatus = mysql_real_connect_cont(&ret, _mysqlPtr.get(), status);
+    if (_waitStatus == 0)
+    {
+        if (!ret)
+        {
+            handleClosed();
+            //perror("");
+            LOG_ERROR << "Failed to mysql_real_connect()";
+            return false;
+        }
+        _status = ConnectStatus_Ok;
+        if (_okCb)
+        {
+            auto thisPtr = shared_from_this();
+            _okCb(thisPtr);
+        }
+    }
+    return true;
+}
+
+bool MysqlConnection::onEventPrepareStart()
+{
+    int err;
+
+    _stmtPtr = mysql_stmt_init(_mysqlPtr);
+    
+    _waitStatus = mysql_stmt_prepare_start(&err, _stmtPtr.get(), _sql.c_str(), _sql.length());
+    LOG_TRACE << "stmt_prepare_start:" << _waitStatus;
+    _execStatus = ExecStatus_Prepare;
+    if (_waitStatus == 0)
+    {
+        if (err)
+        {
+            LOG_ERROR << "error";
+            outputError();
+            return false;
+        }
+        return onEventExecuteStart();
+    }
+    setChannel();
+    return true;
+}
+
+bool MysqlConnection::onEventPrepare(int status)
+{
+    int err = 0;
+    _waitStatus = mysql_stmt_prepare_cont(&err, _stmtPtr.get(), status);
+    LOG_TRACE << "stmt_execute:" << _waitStatus;
+    if (_waitStatus == 0)
+    {
+        if (err)
+        {
+            _execStatus = ExecStatus_None;
+            LOG_ERROR << "error:" << err << " status:" << status;
+            outputError();
+            return false;
+        }
+        return onEventExecuteStart();
+    }
+    setChannel();
+    return true;
+}
+
+bool MysqlConnection::onEventExecuteStart()
+{
+    mysql_stmt_bind_param(_stmtPtr.get(), _binds.data());
+
+    int err = 0;
+    _waitStatus = mysql_stmt_execute_start(&err, _stmtPtr.get());
+    LOG_TRACE << "stmt_execute:" << _waitStatus;
+    if (_waitStatus == 0)
+    {
+        if (err)
+        {
+            _execStatus = ExecStatus_None;
+            LOG_ERROR << "error:" << err;
+            outputError();
+            return false;
+        }
+        return onEventResultStart();
+    }
+    setChannel();
+    return true;    
+}
+
+bool MysqlConnection::onEventExecute(int status)
+{
+    int err = 0;
+    _waitStatus = mysql_stmt_execute_cont(&err, _stmtPtr.get(), _waitStatus);
+    LOG_TRACE << "stmt_execute:" << _waitStatus;
+    if (_waitStatus == 0)
+    {
+        if (err)
+        {
+            _execStatus = ExecStatus_None;
+            LOG_ERROR << "error:" << err;
+            outputError();
+            return false;
+        }
+        return onEventResultStart();
+    }
+    setChannel();
+    return true;
+}
+
+bool MysqlConnection::onEventResultStart()
+{
+    _execStatus = ExecStatus_StoreResult;
+    //绑定结果
+    auto resultPtr = std::shared_ptr<MYSQL_RES>(res, [](MYSQL_RES *r) {
+        mysql_free_result(r);
+    });
+
+    _resultPtr = makeResult(resultPtr, _sql);
+    mysql_stmt_bind_result(_stmtPtr.get(), _resultPtr.getBinds());
+
+    int err;
+    _waitStatus = mysql_stmt_store_result_start(&err, _stmtPtr.get());
+    LOG_TRACE << "stmt_store_result_start:" << _waitStatus;
+    if (_waitStatus == 0)
+    {
+        _execStatus = ExecStatus_FetchRow;
+        if (err)
+        {
+            LOG_ERROR << "error";
+            outputError();
+            return false;
+        }
+        return onEventFetchRowStart();
+    }
+    setChannel();
+    return true;
+}
+
+bool MysqlConnection::onEventResult(int status)
+{
+    //绑定结果
+    int err;
+    _waitStatus = mysql_stmt_store_result_cont(&err, _stmtPtr.get(), status);
+    LOG_TRACE << "stmt_store_result_start:" << _waitStatus;
+    if (_waitStatus == 0)
+    {
+        _execStatus = ExecStatus_FetchRow;
+        if (err)
+        {
+            LOG_ERROR << "error";
+            outputError();
+            return false;
+        }
+        return onEventFetchRowStart();
+    }
+    setChannel();
+    return true;
+}
+
+bool MysqlConnection::onEventFetchRowStart()
+{
+    _execStatus = ExecStatus_FetchRow;
+
+    int err;
+    _waitStatus = mysql_stmt_fetch_start(&err, _stmtPtr.get());
+    LOG_TRACE << "stmt_fetch_row_start:" << _waitStatus;
+    if (_waitStatus == 0)
+    {
+        _execStatus = ExecStatus_FetchRow;
+        if (err)
+        {
+            LOG_ERROR << "error";
+            outputError();
+            return false;
+        }
+        return onEventFetchRow();
+    }
+    setChannel();
+    return true;
+}
+
+bool MysqlConnection::onEventFetchRow(int status)
+{
+    _execStatus = ExecStatus_FetchRow;
+    //绑定结果
+    int err;
+    _waitStatus = mysql_stmt_fetch_cont(&err, _stmtPtr.get(), status);
+    LOG_TRACE << "stmt_fetch_row:" << status;
+    if (_waitStatus == 0)
+    {
+        if (err == MYSQL_NO_DATA)
+        {
+            _execStatus = ExecStatus::ExecStatus_None;
+            // 没有更多的数据
+            // 返回结果集
+            getResult();
+            return true;
+        }
+        else if (err)
+        {
+            LOG_ERROR << "error";
+            outputError();
+            return false;
+        }
+        return onEventFetchRowStart();
+    }
+    setChannel();
+    return true;
+}
+
+void MysqlConnection::bind_param(const char *param, size_t idx, int format, int length)
+{
+    assert(idx < _binds.size());
+    auto &bind = _binds[idx];
+    bind.Buffer = (char*)param;
+    bind.buffer_type = format;
+    switch (format)
+    {
+    case MYSQL_TYPE_TINY:
+    case MYSQL_TYPE_SHORT:
+    case MYSQL_TYPE_LONG:
+    case MYSQL_TYPE_LONGLONG:
+    case MYSQL_TYPE_NULL:
+        break;
+    case MYSQL_TYPE_STRING:
+    {
+        bind.buffer_length = std::strlen(param);
+        bind.length = length;
+    }
+    }    
 }
