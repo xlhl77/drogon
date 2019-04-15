@@ -104,7 +104,7 @@ class MysqlConnection : public DbConnection, public std::enable_shared_from_this
 
     std::unique_ptr<trantor::Channel> _channelPtr;
     std::shared_ptr<MYSQL> _mysqlPtr;
-    std::shared_prt<MYSQL_STMT> _stmtPtr;
+    std::shared_ptr<MYSQL_STMT> _stmtPtr;
 
     void handleTimeout();
 
