@@ -40,7 +40,7 @@ MysqlConnection::MysqlConnection(trantor::EventLoop *loop, const std::string &co
       _mysqlPtr(std::shared_ptr<MYSQL>(new MYSQL, [](MYSQL *p) {
           mysql_close(p);
       })),
-      _stmtPtr(std::shared_ptr<MYSQL_STMT>(new MYSQL_STMT, [](MYSQL_STMT *p {
+      _stmtPtr(std::shared_ptr<MYSQL_STMT>(new MYSQL_STMT, [](MYSQL_STMT *p) {
           mysql_stmt_close(p);
       }))
 {
@@ -303,7 +303,7 @@ void MysqlConnection::getResult()
     // mysql_stmt_affected_rows(_stmtPtr.get()), mysql_stmt_insert_id(_stmtPtr.get()));
     if (_isWorking)
     {
-        _cb(_resultPtr.get());
+        _cb(*(_resultPtr.get()));
         _cb = nullptr;
         _exceptCb = nullptr;
         _isWorking = false;

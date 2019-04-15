@@ -44,7 +44,9 @@ class MysqlResultImpl : public ResultImpl
     {
         if (_fieldNum > 0)
         {
-            _binds = std::make_shared<MYSQL_BIND>(new MYSQL_BIND[_fieldNum]); 
+            _binds = std::make_shared<MYSQL_BIND>(new MYSQL_BIND[_fieldNum], [](MYSQL_BIND* p){
+              delete p[];
+            }); 
             unsigned long len = 0;
             auto &offset = _buffer.second;
             auto *ptr = _buffer.first.data();
@@ -56,8 +58,8 @@ class MysqlResultImpl : public ResultImpl
                 (*_fieldMapPtr)[fieldName] = i;
                 len += _fieldArray[i].length;
                 offset.push_back(len);
-                (*_binds)[i].buffer = ptr + len;
-                (*_binds)[i].buffer_type = _fieldArray[i].type;
+                (*(_binds +i)).buffer = ptr + len;
+                (*(_binds +i)).buffer_type = _fieldArray[i].type;
 
             }
             _buffer.first.resize(len, 0);
