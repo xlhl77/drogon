@@ -30,7 +30,7 @@ namespace orm
 class MysqlResultImpl : public ResultImpl
 {
   public:
-    MysqlResultImpl(const std::shared_ptr<MYSQL_RES> &r,
+    explicit MysqlResultImpl(const std::shared_ptr<MYSQL_RES> &r,
                     const std::string &query,
                     size_type affectedRows,
                     unsigned long long insertId) noexcept
