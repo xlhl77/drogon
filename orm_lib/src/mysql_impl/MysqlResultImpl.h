@@ -73,7 +73,7 @@ class MysqlResultImpl : public ResultImpl
     virtual field_size_type getLength(size_type row, row_size_type column) const override;
     virtual unsigned long long insertId() const noexcept override;
 
-    const MYSQL_BIND *getBinds() { return _binds.get();};
+    MYSQL_BIND *getBinds() { return _binds.get();};
   private:
     const std::shared_ptr<MYSQL_RES> _result;
     const Result::size_type _rowsNum;

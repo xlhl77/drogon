@@ -338,7 +338,7 @@ bool MysqlConnection::onEventPrepareStart()
 {
     int err;
 
-    _stmtPtr = std::make_shared<MYSQL_STMT>(mysql_stmt_init(_mysqlPtr.get());
+    _stmtPtr = std::make_shared<MYSQL_STMT>(mysql_stmt_init(_mysqlPtr.get()));
     
     _waitStatus = mysql_stmt_prepare_start(&err, _stmtPtr.get(), _sql.c_str(), _sql.length());
     LOG_TRACE << "stmt_prepare_start:" << _waitStatus;
@@ -423,7 +423,7 @@ bool MysqlConnection::onEventResultStart()
 {
     _execStatus = ExecStatus_StoreResult;
     //绑定结果
-    auto resultPtr = std::shared_ptr<MYSQL_RES>(mysql_stmt_result_meta(_stmtPtr.get()), [](MYSQL_RES *r) {
+    auto resultPtr = std::shared_ptr<MYSQL_RES>(mysql_stmt_result_metadata(_stmtPtr.get()), [](MYSQL_RES *r) {
         mysql_free_result(r);
     });
 
@@ -524,8 +524,8 @@ void MysqlConnection::bind_param(const char *param, size_t idx, int format, int 
 {
     assert(idx < _binds.size());
     auto &bind = _binds[idx];
-    bind.Buffer = (char*)param;
-    bind.buffer_type = format;
+    bind.buffer = (char*)param;
+    bind.buffer_type = (enum_field_types)format;
     switch (format)
     {
     case MYSQL_TYPE_TINY:
@@ -537,7 +537,7 @@ void MysqlConnection::bind_param(const char *param, size_t idx, int format, int 
     case MYSQL_TYPE_STRING:
     {
         bind.buffer_length = std::strlen(param);
-        bind.length = length;
+        bind.length = &length;
     }
     }    
 }
