@@ -85,7 +85,7 @@ class MysqlResultImpl : public ResultImpl
     std::shared_ptr<std::vector<std::pair<char **, std::vector<unsigned long>>>> _rowsPtr;
 
     std::pair<std::string,std::vector<unsigned long>> _buffer;
-    const std::shared_ptr<MYSQL_BIND> _binds;
+    std::shared_ptr<MYSQL_BIND> _binds;
 };
 
 } // namespace orm

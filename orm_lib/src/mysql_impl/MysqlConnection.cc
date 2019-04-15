@@ -303,7 +303,7 @@ void MysqlConnection::getResult()
     // mysql_stmt_affected_rows(_stmtPtr.get()), mysql_stmt_insert_id(_stmtPtr.get()));
     if (_isWorking)
     {
-        _cb(_resultPtr);
+        _cb(_resultPtr.get());
         _cb = nullptr;
         _exceptCb = nullptr;
         _isWorking = false;
@@ -338,7 +338,7 @@ bool MysqlConnection::onEventPrepareStart()
 {
     int err;
 
-    _stmtPtr = mysql_stmt_init(_mysqlPtr);
+    _stmtPtr = std::make_shared<MYSQL_STMT>(mysql_stmt_init(_mysqlPtr.get());
     
     _waitStatus = mysql_stmt_prepare_start(&err, _stmtPtr.get(), _sql.c_str(), _sql.length());
     LOG_TRACE << "stmt_prepare_start:" << _waitStatus;
@@ -428,7 +428,7 @@ bool MysqlConnection::onEventResultStart()
     });
 
     _resultPtr = makeResult(resultPtr, _sql);
-    mysql_stmt_bind_result(_stmtPtr.get(), _resultPtr.getBinds());
+    mysql_stmt_bind_result(_stmtPtr.get(), _resultPtr->getBinds());
 
     int err;
     _waitStatus = mysql_stmt_store_result_start(&err, _stmtPtr.get());
@@ -485,7 +485,7 @@ bool MysqlConnection::onEventFetchRowStart()
             outputError();
             return false;
         }
-        return onEventFetchRow();
+        return onEventFetchRowStart();
     }
     setChannel();
     return true;
