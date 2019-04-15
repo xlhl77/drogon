@@ -427,7 +427,7 @@ bool MysqlConnection::onEventResultStart()
         mysql_free_result(r);
     });
 
-    _resultPtr = new MysqlResultImpl(resultPtr, _sql);
+    _resultPtr = new MysqlResultImpl(resultPtr, _sql, 0, 0);
     mysql_stmt_bind_result(_stmtPtr.get(), _resultPtr->getBinds());
 
     int err;

@@ -45,7 +45,7 @@ class MysqlResultImpl : public ResultImpl
         if (_fieldNum > 0)
         {
             _binds = std::make_shared<MYSQL_BIND>(new MYSQL_BIND[_fieldNum], [](MYSQL_BIND* p){
-              delete p[];
+              delete[] p;
             }); 
             unsigned long len = 0;
             auto &offset = _buffer.second;
