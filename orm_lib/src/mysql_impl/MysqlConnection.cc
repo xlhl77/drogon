@@ -29,7 +29,7 @@ Result makeResult(const std::shared_ptr<MYSQL_RES> &r = std::shared_ptr<MYSQL_RE
                   Result::size_type affectedRows = 0,
                   unsigned long long insertId = 0)
 {
-    return Result(std::shared_ptr<MysqlResultImpl>(new MysqlResultImpl(r, query, affectedRows, insertId)));
+    return Result(std::make_shared<MysqlResultImpl>(r, query, affectedRows, insertId));
 }
 
 } // namespace orm
@@ -263,7 +263,7 @@ void MysqlConnection::execSqlInLoop(std::string &&sql,
     LOG_TRACE << _sql;
 
     // 生成参数绑定
-    for(auto i = 0; i< paraNum; i++)
+    for(size_t i = 0; i< paraNum; i++)
         bind_param(parameters.at(i), i, format[i], length[i]);
 
     if (!onEventPrepareStart()) return;
@@ -427,7 +427,7 @@ bool MysqlConnection::onEventResultStart()
         mysql_free_result(r);
     });
 
-    _resultPtr = std::make_shared<MysqlResultImpl>(_sql, resultPtr, 0, 0);
+    _resultPtr = std::make_shared<MysqlResultImpl>(resultPtr, _sql, 0, 0);
     mysql_stmt_bind_result(_stmtPtr.get(), _resultPtr->getBinds());
 
     int err;
@@ -537,7 +537,7 @@ void MysqlConnection::bind_param(const char *param, size_t idx, int format, int 
     case MYSQL_TYPE_STRING:
     {
         bind.buffer_length = std::strlen(param);
-        bind.length = &length;
+        // bind.length = &length;
     }
     }    
 }
