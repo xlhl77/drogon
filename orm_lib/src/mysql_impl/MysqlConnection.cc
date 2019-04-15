@@ -423,7 +423,7 @@ bool MysqlConnection::onEventResultStart()
 {
     _execStatus = ExecStatus_StoreResult;
     //绑定结果
-    auto resultPtr = std::shared_ptr<MYSQL_RES>(mysql_stmt_result_metadata(_stmtPtr.get()), [](MYSQL_RES *r) {
+    std::shared_ptr<MYSQL_RES> resultPtr(mysql_stmt_result_metadata(_stmtPtr.get()), [](MYSQL_RES *r) {
         mysql_free_result(r);
     });
 
