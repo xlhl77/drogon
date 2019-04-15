@@ -423,11 +423,11 @@ bool MysqlConnection::onEventResultStart()
 {
     _execStatus = ExecStatus_StoreResult;
     //绑定结果
-    std::shared_ptr<MYSQL_RES> resultPtr(mysql_stmt_result_metadata(_stmtPtr.get()), [](MYSQL_RES *r) {
+    auto resultPtr = std::shared_ptr<MYSQL_RES>(mysql_stmt_result_metadata(_stmtPtr.get()), [](MYSQL_RES *r) {
         mysql_free_result(r);
     });
 
-    _resultPtr = new MysqlResultImpl(_sql, resultPtr, 0, 0);
+    _resultPtr = std::make_shared<MysqlResultImpl>(_sql, resultPtr, 0, 0);
     mysql_stmt_bind_result(_stmtPtr.get(), _resultPtr->getBinds());
 
     int err;
