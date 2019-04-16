@@ -40,8 +40,8 @@ MysqlConnection::MysqlConnection(trantor::EventLoop *loop, const std::string &co
       _mysqlPtr(std::shared_ptr<MYSQL>(new MYSQL, [](MYSQL *p) {
           mysql_close(p);
       })),
-      _stmtPtr(std::shared_ptr<MYSQL_STMT>(new MYSQL_STMT, [](MYSQL_STMT *p) {
-          mysql_stmt_close(p);
+      _stmtPtr(std::shared_ptr<MYSQL_STMT>(nullptr, [](MYSQL_STMT *p) {
+          if (p) mysql_stmt_close(p);
       }))
 {
     mysql_init(_mysqlPtr.get());
@@ -340,7 +340,7 @@ bool MysqlConnection::onEventPrepareStart()
 {
     int err;
     LOG_TRACE << "init stmt:";
-    _stmtPtr = std::shared_ptr<MYSQL_STMT>(mysql_stmt_init(_mysqlPtr.get()));
+    _stmtPtr.reset(mysql_stmt_init(_mysqlPtr.get()));
     LOG_TRACE << "init ok";
     if (!_stmtPtr)
     {
