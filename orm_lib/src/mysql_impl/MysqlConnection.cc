@@ -338,6 +338,7 @@ bool MysqlConnection::onEventConnect(int status)
 
 bool MysqlConnection::onEventPrepareStart()
 {
+    _execStatus = ExecStatus_Prepare;
     int err;
     LOG_TRACE << "init stmt:";
     _stmtPtr.reset(mysql_stmt_init(_mysqlPtr.get()));
@@ -350,10 +351,8 @@ bool MysqlConnection::onEventPrepareStart()
     }
     _waitStatus = mysql_stmt_prepare_start(&err, _stmtPtr.get(), _sql.c_str(), _sql.length());
     LOG_TRACE << "stmt_prepare_start:" << _waitStatus;
-    _execStatus = ExecStatus_Prepare;
     if (_waitStatus == 0)
     {
-        _execStatus = ExecStatus_Execute;
         if (err)
         {
             LOG_ERROR << "error";
@@ -370,7 +369,7 @@ bool MysqlConnection::onEventPrepare(int status)
 {
     int err = 0;
     _waitStatus = mysql_stmt_prepare_cont(&err, _stmtPtr.get(), status);
-    LOG_TRACE << "stmt_execute:" << _waitStatus;
+    LOG_TRACE << "stmt_prepare_cont:" << _waitStatus;
     if (_waitStatus == 0)
     {
         if (err)
@@ -388,6 +387,8 @@ bool MysqlConnection::onEventPrepare(int status)
 
 bool MysqlConnection::onEventExecuteStart()
 {
+    _execStatus = ExecStatus_Execute;
+
     mysql_stmt_bind_param(_stmtPtr.get(), _binds.data());
 
     int err = 0;
