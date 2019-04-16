@@ -353,6 +353,7 @@ bool MysqlConnection::onEventPrepareStart()
     _execStatus = ExecStatus_Prepare;
     if (_waitStatus == 0)
     {
+        _execStatus = ExecStatus_Execute;
         if (err)
         {
             LOG_ERROR << "error";
