@@ -265,7 +265,7 @@ void MysqlConnection::execSqlInLoop(std::string &&sql,
     // 生成参数绑定
     for(size_t i = 0; i< paraNum; i++)
         bind_param(parameters.at(i), i, format[i], length[i]);
-
+    LOG_TRACE << _sql;
     if (!onEventPrepareStart()) return;
     setChannel();
     return;
@@ -526,6 +526,7 @@ void MysqlConnection::bind_param(const char *param, size_t idx, int format, int 
     auto &bind = _binds[idx];
     bind.buffer = (char*)param;
     bind.buffer_type = (enum_field_types)format;
+    LOG_TRACE << "Bind Param!";
     switch (format)
     {
     case MYSQL_TYPE_TINY:
