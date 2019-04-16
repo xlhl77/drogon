@@ -204,25 +204,25 @@ void MysqlConnection::handleEvent()
         {
         case ExecStatus_Prepare:
         {
-            if (!onEventPrepare(status)) return;
+            onEventPrepare(status);
             setChannel();
             break;
         }
         case ExecStatus_Execute:
         {
-            if (!onEventExecute(status)) return;
+            onEventExecute(status);
             setChannel();
             break;
         }
         case ExecStatus_StoreResult:
         {
-            if (!onEventResult(status)) return;
+            onEventResult(status);
             setChannel();
             break;
         }
         case ExecStatus_FetchRow:
         {
-            if (!onEventFetchRow(status)) return;
+            onEventFetchRow(status);
             setChannel();
             break;
         }        
