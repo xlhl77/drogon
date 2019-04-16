@@ -440,7 +440,7 @@ bool MysqlConnection::onEventResultStart()
     _resultPtr = std::make_shared<MysqlResultImpl>(resultPtr, _sql, 0, 0);
     if (!mysql_stmt_bind_result(_stmtPtr.get(), _resultPtr->getBinds()))
     {
-        LOG_ERROR << "bind_result error!";
+        LOG_ERROR << "bind_result error!" << mysql_stmt_error(_stmtPtr.get());
         outputError();
         return false;
     }
