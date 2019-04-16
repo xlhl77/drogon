@@ -438,14 +438,18 @@ bool MysqlConnection::onEventResultStart()
     });
 
     _resultPtr = std::make_shared<MysqlResultImpl>(resultPtr, _sql, 0, 0);
-    mysql_stmt_bind_result(_stmtPtr.get(), _resultPtr->getBinds());
+    if (!mysql_stmt_bind_result(_stmtPtr.get(), _resultPtr->getBinds()))
+    {
+        LOG_ERROR << "bind_result error!";
+        outputError();
+        return false;
+    }
 
     int err;
     _waitStatus = mysql_stmt_store_result_start(&err, _stmtPtr.get());
     LOG_TRACE << "stmt_store_result_start:" << _waitStatus;
     if (_waitStatus == 0)
     {
-        _execStatus = ExecStatus_FetchRow;
         if (err)
         {
             LOG_ERROR << "error";
@@ -463,10 +467,9 @@ bool MysqlConnection::onEventResult(int status)
     //绑定结果
     int err;
     _waitStatus = mysql_stmt_store_result_cont(&err, _stmtPtr.get(), status);
-    LOG_TRACE << "stmt_store_result_start:" << _waitStatus;
+    LOG_TRACE << "stmt_store_result:" << _waitStatus;
     if (_waitStatus == 0)
     {
-        _execStatus = ExecStatus_FetchRow;
         if (err)
         {
             LOG_ERROR << "error";
