@@ -58,8 +58,8 @@ class MysqlResultImpl : public ResultImpl
                 (*_fieldMapPtr)[fieldName] = i;
                 len += _fieldArray[i].length;
                 offset.push_back(len);
-                (*(_binds.get() +i)).buffer = ptr + len;
-                (*(_binds.get() +i)).buffer_type = _fieldArray[i].type;
+                _binds[i].buffer = ptr + len;
+                _binds[i].buffer_type = _fieldArray[i].type;
 
             }
             _buffer.first.resize(len, 0);
