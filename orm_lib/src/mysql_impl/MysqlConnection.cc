@@ -339,9 +339,9 @@ bool MysqlConnection::onEventConnect(int status)
 bool MysqlConnection::onEventPrepareStart()
 {
     int err;
-
+    LOG_TRACE << "init stmt:";
     _stmtPtr = std::shared_ptr<MYSQL_STMT>(mysql_stmt_init(_mysqlPtr.get()));
-    LOG_TRACE << "init:";
+    LOG_TRACE << "init ok";
     if (!_stmtPtr)
     {
             LOG_ERROR << "error";
