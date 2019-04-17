@@ -76,7 +76,7 @@ class MysqlResultImpl : public ResultImpl
     MYSQL_BIND* addRow();
   private:
     const std::shared_ptr<MYSQL_RES> _result;
-    const Result::size_type _rowsNum;
+    Result::size_type _rowsNum;
     const MYSQL_FIELD *_fieldArray;
     const Result::row_size_type _fieldNum;
     const size_type _affectedRows;
