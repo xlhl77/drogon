@@ -67,7 +67,7 @@ Result::field_size_type MysqlResultImpl::getLength(size_type row, row_size_type 
         return 0;
     assert(row < _rowsNum);
     assert(column < _fieldNum);
-    return return (_rowData[row][column].type()==JSON::value_t::string)
+    return (_rowData[row][column].type()==JSON::value_t::string)
     ? _rowData[row][column].get<std::string>().size()
     : _rowData[row][column].dump().size();;
 }
