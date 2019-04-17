@@ -125,7 +125,7 @@ MYSQL_BIND *MysqlResultImpl::addRow()
 		    break;
 	    }
     }
-
+    LOG_TRACE << _rowData.dump();
     _rowsNum++;
     return _binds.get();
 }
