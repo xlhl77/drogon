@@ -40,9 +40,7 @@ MysqlConnection::MysqlConnection(trantor::EventLoop *loop, const std::string &co
       _mysqlPtr(std::shared_ptr<MYSQL>(new MYSQL, [](MYSQL *p) {
           mysql_close(p);
       })),
-      _stmtPtr(std::shared_ptr<MYSQL_STMT>(nullptr, [](MYSQL_STMT *p) {
-          if (p) mysql_stmt_close(p);
-      }))
+      _stmtPtr(nullptr)
 {
     mysql_init(_mysqlPtr.get());
     mysql_options(_mysqlPtr.get(), MYSQL_OPT_NONBLOCK, 0);
@@ -340,17 +338,17 @@ bool MysqlConnection::onEventPrepareStart()
 {
     _execStatus = ExecStatus_Prepare;
     int err;
-    LOG_TRACE << "init stmt:";
-    _stmtPtr.reset(mysql_stmt_init(_mysqlPtr.get()));
-    LOG_TRACE << "init ok";
+    _stmtPtr.reset(mysql_stmt_init(_mysqlPtr.get()), [](MYSQL_STMT *p) {
+          if (p) mysql_stmt_close(p);
+      });
     if (!_stmtPtr)
     {
-            LOG_ERROR << "error";
+            LOG_ERROR << "error init stmt!";
             outputError();
             return false;        
     }
     _waitStatus = mysql_stmt_prepare_start(&err, _stmtPtr.get(), _sql.c_str(), _sql.length());
-    LOG_TRACE << "stmt_prepare_start:" << _waitStatus;
+    LOG_TRACE << "stmt_prepare_start:" << err;
     if (_waitStatus == 0)
     {
         if (err)
@@ -369,7 +367,7 @@ bool MysqlConnection::onEventPrepare(int status)
 {
     int err = 0;
     _waitStatus = mysql_stmt_prepare_cont(&err, _stmtPtr.get(), status);
-    LOG_TRACE << "stmt_prepare_cont:" << _waitStatus;
+    LOG_TRACE << "stmt_prepare_cont:" << err;
     if (_waitStatus == 0)
     {
         if (err)
@@ -393,7 +391,7 @@ bool MysqlConnection::onEventExecuteStart()
 
     int err = 0;
     _waitStatus = mysql_stmt_execute_start(&err, _stmtPtr.get());
-    LOG_TRACE << "stmt_execute:" << _waitStatus;
+    LOG_TRACE << "stmt_execute_start:" << err;
     if (_waitStatus == 0)
     {
         if (err)
@@ -413,7 +411,7 @@ bool MysqlConnection::onEventExecute(int status)
 {
     int err = 0;
     _waitStatus = mysql_stmt_execute_cont(&err, _stmtPtr.get(), status);
-    LOG_TRACE << "stmt_execute:" << _waitStatus;
+    LOG_TRACE << "stmt_execute:" << err;
     if (_waitStatus == 0)
     {
         if (err)
@@ -438,16 +436,10 @@ bool MysqlConnection::onEventResultStart()
     });
 
     _resultPtr = std::make_shared<MysqlResultImpl>(resultPtr, _sql, 0, 0);
-    if (mysql_stmt_bind_result(_stmtPtr.get(), _resultPtr->getBinds()))
-    {
-        LOG_ERROR << "bind_result error!" << mysql_stmt_error(_stmtPtr.get());
-        outputError();
-        return false;
-    }
 
     int err;
     _waitStatus = mysql_stmt_store_result_start(&err, _stmtPtr.get());
-    LOG_TRACE << "stmt_store_result_start:" << _waitStatus;
+    LOG_TRACE << "stmt_store_result_start:" << err;
     if (_waitStatus == 0)
     {
         if (err)
@@ -467,7 +459,7 @@ bool MysqlConnection::onEventResult(int status)
     //绑定结果
     int err;
     _waitStatus = mysql_stmt_store_result_cont(&err, _stmtPtr.get(), status);
-    LOG_TRACE << "stmt_store_result:" << _waitStatus;
+    LOG_TRACE << "stmt_store_result:" << err;
     if (_waitStatus == 0)
     {
         if (err)
@@ -485,17 +477,21 @@ bool MysqlConnection::onEventResult(int status)
 bool MysqlConnection::onEventFetchRowStart()
 {
     _execStatus = ExecStatus_FetchRow;
+    if (mysql_stmt_bind_result(_stmtPtr.get(), _resultPtr->addRow()))
+    {
+        LOG_ERROR << "bind_result error!" << mysql_stmt_error(_stmtPtr.get());
+        outputError();
+        return false;
+    }
 
     int err;
     _waitStatus = mysql_stmt_fetch_start(&err, _stmtPtr.get());
-    LOG_TRACE << "stmt_fetch_row_start:" << err;
     if (_waitStatus == 0)
     {
 	if (err == MYSQL_NO_DATA)
 	{
 	    _execStatus = ExecStatus_None;
 	    getResult();
-	    mysql_stmt_close(_stmtPtr.get());
 	    return true;
 	}
 	else if (err)

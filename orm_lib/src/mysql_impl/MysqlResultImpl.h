@@ -48,24 +48,19 @@ class MysqlResultImpl : public ResultImpl
               delete[] p;
             }); 
             unsigned long len = 0;
-            auto &offset = _buffer.second;
-            auto *ptr = _buffer.first.data();
             _fieldMapPtr = std::make_shared<std::unordered_map<std::string, row_size_type>>();
             for (row_size_type i = 0; i < _fieldNum; i++)
             {
                 std::string fieldName = _fieldArray[i].name;
                 std::transform(fieldName.begin(), fieldName.end(), fieldName.begin(), tolower);
                 (*_fieldMapPtr)[fieldName] = i;
+                _offset.emplace_back({_fieldArray[i].length, len});
                 len += _fieldArray[i].length;
-                offset.push_back(len);
-		LOG_TRACE << "field: " << fieldName;
-		std::memset(&(_binds.get()[i]), 0 , sizeof(MYSQL_BIND));
-                _binds.get()[i].buffer = ptr + len;
+		            std::memset(&(_binds.get()[i]), 0 , sizeof(MYSQL_BIND));
                 _binds.get()[i].buffer_type = _fieldArray[i].type;
-		_binds.get()[i].buffer_length = _fieldArray[i].length;
-
+	            	_binds.get()[i].buffer_length = _fieldArray[i].length;
             }
-            _buffer.first.resize(len, 0);
+
         }
     }
     virtual size_type size() const noexcept override;
@@ -78,7 +73,7 @@ class MysqlResultImpl : public ResultImpl
     virtual field_size_type getLength(size_type row, row_size_type column) const override;
     virtual unsigned long long insertId() const noexcept override;
 
-    MYSQL_BIND *getBinds() { return &(_binds.get()[0]);};
+    void addRow();
   private:
     const std::shared_ptr<MYSQL_RES> _result;
     const Result::size_type _rowsNum;
@@ -87,9 +82,11 @@ class MysqlResultImpl : public ResultImpl
     const size_type _affectedRows;
     const unsigned long long _insertId;
     std::shared_ptr<std::unordered_map<std::string, row_size_type>> _fieldMapPtr;
-    std::shared_ptr<std::vector<std::pair<char **, std::vector<unsigned long>>>> _rowsPtr;
+    // std::shared_ptr<std::vector<std::pair<char **, std::vector<unsigned long>>>> _rowsPtr;
 
-    std::pair<std::string,std::vector<unsigned long>> _buffer;
+    // std::pair<std::string,std::vector<unsigned long>> _buffer;
+    std::vector<std::string> _rowData;
+    std::vector<std::pair<unsigned long,unsigned long>> _offset;
     std::shared_ptr<MYSQL_BIND> _binds;
 };
 

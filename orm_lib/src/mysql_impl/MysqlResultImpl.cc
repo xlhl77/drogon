@@ -53,7 +53,7 @@ const char *MysqlResultImpl::getValue(size_type row, row_size_type column) const
         return NULL;
     assert(row < _rowsNum);
     assert(column < _fieldNum);
-    return (*_rowsPtr)[row].first[column];
+    return _rowData[row].data() + _offset[column].second;
 }
 bool MysqlResultImpl::isNull(size_type row, row_size_type column) const
 {
@@ -65,9 +65,21 @@ Result::field_size_type MysqlResultImpl::getLength(size_type row, row_size_type 
         return 0;
     assert(row < _rowsNum);
     assert(column < _fieldNum);
-    return (*_rowsPtr)[row].second[column];
+    return _offset[column].first;
 }
 unsigned long long MysqlResultImpl::insertId() const noexcept
 {
     return _insertId;
+}
+
+MYSQL_BIND *MysqlResultImpl::addRow()
+{
+    _rowData.push_back("");
+    char *ptr = _rowData.back().data();
+    for (row_size_type i = 0; i < _fieldNum; i++)
+    {
+        _binds.get()[i].buffer = ptr + _offset[i].second;
+    }
+    _rowData.back().resize(_offset[_fieldNum - 1].second, 0);
+    return _binds.get();
 }
