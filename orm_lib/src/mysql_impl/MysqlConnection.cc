@@ -486,15 +486,16 @@ bool MysqlConnection::onEventFetchRowStart()
 
     int err;
     _waitStatus = mysql_stmt_fetch_start(&err, _stmtPtr.get());
+    LOG_TRACE << "fetch_row_start!";
     if (_waitStatus == 0)
     {
-	if (err == MYSQL_NO_DATA)
-	{
-	    _execStatus = ExecStatus_None;
-	    getResult();
-	    return true;
-	}
-	else if (err)
+        if (err == MYSQL_NO_DATA)
+        {
+            _execStatus = ExecStatus_None;
+            getResult();
+            return true;
+        }
+        else if (err)
         {
             LOG_ERROR << "error " << mysql_stmt_error(_stmtPtr.get());
             outputError();

@@ -20,7 +20,7 @@ using namespace drogon::orm;
 
 Result::size_type MysqlResultImpl::size() const noexcept
 {
-    return _rowsNum;
+    return _rowsNum - 1;
 }
 Result::row_size_type MysqlResultImpl::columns() const noexcept
 {
@@ -75,7 +75,7 @@ unsigned long long MysqlResultImpl::insertId() const noexcept
 MYSQL_BIND *MysqlResultImpl::addRow()
 {
     _rowData.push_back("");
-    char *ptr = _rowData.back().data();
+    char *ptr = _rowData[_rowsNum].data();
     for (row_size_type i = 0; i < _fieldNum; i++)
     {
         _binds.get()[i].buffer = ptr + _offset[i].second;
