@@ -81,5 +81,6 @@ MYSQL_BIND *MysqlResultImpl::addRow()
         _binds.get()[i].buffer = ptr + _offset[i].second;
     }
     _rowData.back().resize(_offset[_fieldNum - 1].second, 0);
+    _rowsNum++;
     return _binds.get();
 }
