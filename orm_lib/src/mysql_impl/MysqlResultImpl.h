@@ -49,7 +49,6 @@ class MysqlResultImpl : public ResultImpl
             _binds = std::shared_ptr<MYSQL_BIND>(new MYSQL_BIND[_fieldNum], [](MYSQL_BIND* p){
               delete[] p;
             }); 
-            unsigned long len = 0;
             _fieldMapPtr = std::make_shared<std::unordered_map<std::string, row_size_type>>();
             for (row_size_type i = 0; i < _fieldNum; i++)
             {

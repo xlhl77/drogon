@@ -79,7 +79,7 @@ MYSQL_BIND *MysqlResultImpl::addRow()
 
     for (row_size_type i = 0; i < _fieldNum; i++)
     {
-        switch (type) {
+        switch (_fieldArray[i].type) {
 		case MYSQL_TYPE_TINY:
 		case MYSQL_TYPE_SHORT:
 		case MYSQL_TYPE_LONG:
