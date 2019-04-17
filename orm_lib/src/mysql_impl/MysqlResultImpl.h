@@ -21,7 +21,7 @@
 #include <unordered_map>
 #include <algorithm>
 #include <vector>
-
+#include <cstring>
 namespace drogon
 {
 namespace orm
@@ -58,8 +58,11 @@ class MysqlResultImpl : public ResultImpl
                 (*_fieldMapPtr)[fieldName] = i;
                 len += _fieldArray[i].length;
                 offset.push_back(len);
+		LOG_TRACE << "field: " << fieldName;
+		std::memset(&(_binds.get()[i]), 0 , sizeof(MYSQL_BIND));
                 _binds.get()[i].buffer = ptr + len;
                 _binds.get()[i].buffer_type = _fieldArray[i].type;
+		_binds.get()[i].buffer_length = _fieldArray[i].length;
 
             }
             _buffer.first.resize(len, 0);
@@ -75,7 +78,7 @@ class MysqlResultImpl : public ResultImpl
     virtual field_size_type getLength(size_type row, row_size_type column) const override;
     virtual unsigned long long insertId() const noexcept override;
 
-    MYSQL_BIND *getBinds() { return _binds.get();};
+    MYSQL_BIND *getBinds() { return &(_binds.get()[0]);};
   private:
     const std::shared_ptr<MYSQL_RES> _result;
     const Result::size_type _rowsNum;

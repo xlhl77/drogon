@@ -412,7 +412,7 @@ bool MysqlConnection::onEventExecuteStart()
 bool MysqlConnection::onEventExecute(int status)
 {
     int err = 0;
-    _waitStatus = mysql_stmt_execute_cont(&err, _stmtPtr.get(), _waitStatus);
+    _waitStatus = mysql_stmt_execute_cont(&err, _stmtPtr.get(), status);
     LOG_TRACE << "stmt_execute:" << _waitStatus;
     if (_waitStatus == 0)
     {
@@ -438,7 +438,7 @@ bool MysqlConnection::onEventResultStart()
     });
 
     _resultPtr = std::make_shared<MysqlResultImpl>(resultPtr, _sql, 0, 0);
-    if (!mysql_stmt_bind_result(_stmtPtr.get(), _resultPtr->getBinds()))
+    if (mysql_stmt_bind_result(_stmtPtr.get(), _resultPtr->getBinds()))
     {
         LOG_ERROR << "bind_result error!" << mysql_stmt_error(_stmtPtr.get());
         outputError();
@@ -488,13 +488,19 @@ bool MysqlConnection::onEventFetchRowStart()
 
     int err;
     _waitStatus = mysql_stmt_fetch_start(&err, _stmtPtr.get());
-    LOG_TRACE << "stmt_fetch_row_start:" << _waitStatus;
+    LOG_TRACE << "stmt_fetch_row_start:" << err;
     if (_waitStatus == 0)
     {
-        _execStatus = ExecStatus_FetchRow;
-        if (err)
+	if (err == MYSQL_NO_DATA)
+	{
+	    _execStatus = ExecStatus_None;
+	    getResult();
+	    mysql_stmt_close(_stmtPtr.get());
+	    return true;
+	}
+	else if (err)
         {
-            LOG_ERROR << "error";
+            LOG_ERROR << "error " << mysql_stmt_error(_stmtPtr.get());
             outputError();
             return false;
         }
@@ -506,22 +512,12 @@ bool MysqlConnection::onEventFetchRowStart()
 
 bool MysqlConnection::onEventFetchRow(int status)
 {
-    _execStatus = ExecStatus_FetchRow;
-    //绑定结果
     int err;
     _waitStatus = mysql_stmt_fetch_cont(&err, _stmtPtr.get(), status);
     LOG_TRACE << "stmt_fetch_row:" << status;
     if (_waitStatus == 0)
     {
-        if (err == MYSQL_NO_DATA)
-        {
-            _execStatus = ExecStatus::ExecStatus_None;
-            // 没有更多的数据
-            // 返回结果集
-            getResult();
-            return true;
-        }
-        else if (err)
+        if (err)
         {
             LOG_ERROR << "error";
             outputError();
