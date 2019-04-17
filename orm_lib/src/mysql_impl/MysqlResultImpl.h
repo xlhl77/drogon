@@ -23,7 +23,7 @@
 #include <vector>
 #include <cstring>
 #include "json.hpp"
-typedef nolohmann::json JSON; 
+typedef nlohmann::json JSON; 
 namespace drogon
 {
 namespace orm
