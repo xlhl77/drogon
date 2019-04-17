@@ -22,6 +22,8 @@
 #include <algorithm>
 #include <vector>
 #include <cstring>
+#include "json.hpp"
+using JSON = nolohmann::json;
 namespace drogon
 {
 namespace orm
@@ -54,8 +56,8 @@ class MysqlResultImpl : public ResultImpl
                 std::string fieldName = _fieldArray[i].name;
                 std::transform(fieldName.begin(), fieldName.end(), fieldName.begin(), tolower);
                 (*_fieldMapPtr)[fieldName] = i;
-                _offset.push_back({_fieldArray[i].length, len});
-                len += _fieldArray[i].length;
+                // _offset.push_back({_fieldArray[i].length, len});
+                // len += _fieldArray[i].length;
 		            std::memset(&(_binds.get()[i]), 0 , sizeof(MYSQL_BIND));
                 _binds.get()[i].buffer_type = _fieldArray[i].type;
 	            	_binds.get()[i].buffer_length = _fieldArray[i].length;
@@ -82,11 +84,8 @@ class MysqlResultImpl : public ResultImpl
     const size_type _affectedRows;
     const unsigned long long _insertId;
     std::shared_ptr<std::unordered_map<std::string, row_size_type>> _fieldMapPtr;
-    // std::shared_ptr<std::vector<std::pair<char **, std::vector<unsigned long>>>> _rowsPtr;
 
-    // std::pair<std::string,std::vector<unsigned long>> _buffer;
-    std::vector<std::string> _rowData;
-    std::vector<std::pair<unsigned long,unsigned long>> _offset;
+    JSON _rowData = JSON::array();
     std::shared_ptr<MYSQL_BIND> _binds;
 };
 

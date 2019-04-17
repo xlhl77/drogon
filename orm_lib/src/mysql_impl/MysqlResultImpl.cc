@@ -53,7 +53,7 @@ const char *MysqlResultImpl::getValue(size_type row, row_size_type column) const
         return NULL;
     assert(row < _rowsNum);
     assert(column < _fieldNum);
-    return _rowData[row].data() + _offset[column].second;
+    return _rowData[row][column].value<string>();
 }
 bool MysqlResultImpl::isNull(size_type row, row_size_type column) const
 {
@@ -65,7 +65,7 @@ Result::field_size_type MysqlResultImpl::getLength(size_type row, row_size_type 
         return 0;
     assert(row < _rowsNum);
     assert(column < _fieldNum);
-    return _offset[column].first;
+    return _rowData[row][column].size();
 }
 unsigned long long MysqlResultImpl::insertId() const noexcept
 {
@@ -74,13 +74,55 @@ unsigned long long MysqlResultImpl::insertId() const noexcept
 
 MYSQL_BIND *MysqlResultImpl::addRow()
 {
-    _rowData.push_back("");
-    char *ptr = _rowData[_rowsNum].data();
+    _rowData.push_back(JSON::array());
+    JSON &row = _rowData[_rowsNum];
+
     for (row_size_type i = 0; i < _fieldNum; i++)
     {
-        _binds.get()[i].buffer = ptr + _offset[i].second;
+        switch (type) {
+		case MYSQL_TYPE_TINY:
+		case MYSQL_TYPE_SHORT:
+		case MYSQL_TYPE_LONG:
+			row[i] = 0;
+            _binds.get()[i].buffer = (char *)row[i].get_ptr<JSON::number_integer_t*>();
+			break;
+		case MYSQL_TYPE_FLOAT:
+		case MYSQL_TYPE_DOUBLE:
+			row[i] = 0.0;
+            _binds.get()[i].buffer = (char *)row[i].get_ptr<JSON::number_float_t*>();
+			break;
+		case MYSQL_TYPE_NULL:
+		case MYSQL_TYPE_TIMESTAMP:
+		case MYSQL_TYPE_LONGLONG:
+		case MYSQL_TYPE_INT24:
+		case MYSQL_TYPE_DATE:
+		case MYSQL_TYPE_TIME:
+		case MYSQL_TYPE_DATETIME:
+		case MYSQL_TYPE_YEAR:
+		case MYSQL_TYPE_NEWDATE:
+		case MYSQL_TYPE_VARCHAR:
+		case MYSQL_TYPE_BIT:
+		case MYSQL_TYPE_TIMESTAMP2:
+		case MYSQL_TYPE_DATETIME2:
+		case MYSQL_TYPE_TIME2:
+		case MYSQL_TYPE_DECIMAL:
+        case MYSQL_TYPE_NEWDECIMAL:
+		case MYSQL_TYPE_ENUM:
+		case MYSQL_TYPE_SET:
+		case MYSQL_TYPE_TINY_BLOB:
+		case MYSQL_TYPE_MEDIUM_BLOB:
+		case MYSQL_TYPE_LONG_BLOB:
+		case MYSQL_TYPE_BLOB:
+		case MYSQL_TYPE_VAR_STRING:
+		case MYSQL_TYPE_STRING:
+			row[i] = string(_fieldArray[i].length,'\0');
+            _binds.get()[i].buffer = (char *) (row[i].get_ptr<JSON::string_t*>())->c_str();
+			return;
+		case MYSQL_TYPE_GEOMETRY:
+		    break;
+	    }
     }
-    _rowData.back().resize(_offset[_fieldNum - 1].second, 0);
+
     _rowsNum++;
     return _binds.get();
 }
