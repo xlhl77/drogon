@@ -53,7 +53,7 @@ const char *MysqlResultImpl::getValue(size_type row, row_size_type column) const
         return NULL;
     assert(row < _rowsNum);
     assert(column < _fieldNum);
-    return _rowData[row][column].value<string>();
+    return _rowData[row][column].get<std::string>();
 }
 bool MysqlResultImpl::isNull(size_type row, row_size_type column) const
 {
@@ -115,7 +115,7 @@ MYSQL_BIND *MysqlResultImpl::addRow()
 		case MYSQL_TYPE_BLOB:
 		case MYSQL_TYPE_VAR_STRING:
 		case MYSQL_TYPE_STRING:
-			row[i] = string(_fieldArray[i].length,'\0');
+			row[i] = std::string(_fieldArray[i].length,'\0');
             _binds.get()[i].buffer = (char *) (row[i].get_ptr<JSON::string_t*>())->c_str();
 			return;
 		case MYSQL_TYPE_GEOMETRY:
