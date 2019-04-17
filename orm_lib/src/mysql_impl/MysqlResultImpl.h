@@ -54,7 +54,7 @@ class MysqlResultImpl : public ResultImpl
                 std::string fieldName = _fieldArray[i].name;
                 std::transform(fieldName.begin(), fieldName.end(), fieldName.begin(), tolower);
                 (*_fieldMapPtr)[fieldName] = i;
-                _offset.emplace_back({_fieldArray[i].length, len});
+                _offset.push_back({_fieldArray[i].length, len});
                 len += _fieldArray[i].length;
 		            std::memset(&(_binds.get()[i]), 0 , sizeof(MYSQL_BIND));
                 _binds.get()[i].buffer_type = _fieldArray[i].type;
@@ -73,7 +73,7 @@ class MysqlResultImpl : public ResultImpl
     virtual field_size_type getLength(size_type row, row_size_type column) const override;
     virtual unsigned long long insertId() const noexcept override;
 
-    void addRow();
+    MYSQL_BIND* addRow();
   private:
     const std::shared_ptr<MYSQL_RES> _result;
     const Result::size_type _rowsNum;
