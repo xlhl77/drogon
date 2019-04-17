@@ -53,7 +53,7 @@ const char *MysqlResultImpl::getValue(size_type row, row_size_type column) const
         return NULL;
     assert(row < _rowsNum);
     assert(column < _fieldNum);
-    return _rowData[row][column].get<std::string>();
+    return _rowData[row][column].get<std::string>().c_str();
 }
 bool MysqlResultImpl::isNull(size_type row, row_size_type column) const
 {
