@@ -82,11 +82,12 @@ MYSQL_BIND *MysqlResultImpl::addRow()
     JSON &row = _rowData[_rowsNum];
     if (_rowsNum > 0 && _rowData[_rowsNum - 1].is_array()) 
     {
-        for (auto &j : _rowData[_rowsNum - 1])
+        JSON &last = _rowData[_rowsNum];
+        for (row_size_type i = 0; i < _fieldNum; i++)
         {
-            if (j.type() == JSON::value_t::string)
+            if (last[i].type() == JSON::value_t::string)
             {
-                std::string *s = j.get_ptr<JSON::string_t>();
+                std::string *s = last[i].get_ptr<JSON::string_t>();
                 s->resize(std::strlen(s->c_str()));
             }
         }
