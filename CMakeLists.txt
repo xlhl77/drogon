@@ -121,7 +121,6 @@ add_custom_command(TARGET makeVersion
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
         VERBATIM )
 
-add_subdirectory(examples)
 add_subdirectory(drogon_ctl)
 
 aux_source_directory(${PROJECT_SOURCE_DIR}/lib/src DIR_SRCS)
@@ -185,6 +184,8 @@ file(APPEND "${CONFIG_HEADER}" "\";\n")
 EXEC_PROGRAM(${PROJECT_SOURCE_DIR}/update_config.sh ARGS "${CONFIG_HEADER} ${PROJECT_SOURCE_DIR}/lib/inc/drogon/config.h")
 
 if (MAKETEST STREQUAL YES)
+    add_subdirectory(examples)
+
     ADD_SUBDIRECTORY(lib/tests)
     if(PostgreSQL_FOUND)
         add_subdirectory(${PROJECT_SOURCE_DIR}/orm_lib/src/postgresql_impl/test)
