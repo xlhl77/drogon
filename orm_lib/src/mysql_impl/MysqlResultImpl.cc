@@ -99,14 +99,18 @@ MYSQL_BIND *MysqlResultImpl::addRow()
 		case MYSQL_TYPE_TINY:
 		case MYSQL_TYPE_SHORT:
 		case MYSQL_TYPE_LONG:
+        {
 			row[i] = 0;
             _binds.get()[i].buffer = (char *)row[i].get_ptr<JSON::number_integer_t*>();
 			break;
+        }
 		case MYSQL_TYPE_FLOAT:
 		case MYSQL_TYPE_DOUBLE:
+        {
 			row[i] = 0.0;
             _binds.get()[i].buffer = (char *)row[i].get_ptr<JSON::number_float_t*>();
 			break;
+        }
 		case MYSQL_TYPE_NULL:
 		case MYSQL_TYPE_TIMESTAMP:
 		case MYSQL_TYPE_LONGLONG:
@@ -131,9 +135,12 @@ MYSQL_BIND *MysqlResultImpl::addRow()
 		case MYSQL_TYPE_BLOB:
 		case MYSQL_TYPE_VAR_STRING:
 		case MYSQL_TYPE_STRING:
+        {
 			row[i] = std::string(_fieldArray[i].length,'\0');
             _binds.get()[i].buffer = (char *) (row[i].get_ptr<JSON::string_t*>())->c_str();
             _binds.get()[i].length = &_len[i];
+            break;
+        }
 		case MYSQL_TYPE_GEOMETRY:
 		    break;
 	    }
