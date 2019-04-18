@@ -80,14 +80,14 @@ MYSQL_BIND *MysqlResultImpl::addRow()
 {
     _rowData.push_back(JSON::array());
     JSON &row = _rowData[_rowsNum];
-    if (_rowsNum > 0) 
+    if (_rowsNum > 0 && _rowData[_rowsNum - 1].is_array()) 
     {
         for (auto &j : _rowData[_rowsNum - 1])
         {
             if (j.type() == JSON::value_t::string)
             {
                 std::string *s = j.get_ptr<JSON::string_t>();
-                s->resize(std::strlen(s.c_str()));
+                s->resize(std::strlen(s->c_str()));
             }
         }
         LOG_TRACE << _rowData[_rowsNum - 1].dump();
