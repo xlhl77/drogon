@@ -87,7 +87,7 @@ MYSQL_BIND *MysqlResultImpl::addRow()
         {
             if (last[i].type() == JSON::value_t::string)
             {
-                std::string *s = last[i].get_ptr<JSON::string_t>();
+                std::string *s = last[i].get_ptr<JSON::string_t*>();
                 s->resize(std::strlen(s->c_str()));
             }
         }
