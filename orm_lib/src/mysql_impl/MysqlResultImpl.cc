@@ -88,12 +88,10 @@ MYSQL_BIND *MysqlResultImpl::addRow()
             if (last[i].type() == JSON::value_t::string)
             {
                 std::string *s = last[i].get_ptr<JSON::string_t*>();
-                LOG_TRACE << *s;
                 s->resize(_len[i]);
-                LOG_TRACE << *s;
             }
         }
-        LOG_TRACE << _rowData[_rowsNum - 1].dump();
+        LOG_TRACE << last.dump();
     }
     for (row_size_type i = 0; i < _fieldNum; i++)
     {
