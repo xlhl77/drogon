@@ -82,7 +82,7 @@ MYSQL_BIND *MysqlResultImpl::addRow()
     JSON &row = _rowData[_rowsNum];
     if (_rowsNum > 0) 
     {
-        for (auto &j : _rowData[_rowsNum - 1].items())
+        for (auto &j : _rowData[_rowsNum - 1])
         {
             if (j.type() == JSON::value_t::string)
             {
