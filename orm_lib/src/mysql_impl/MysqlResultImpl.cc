@@ -88,7 +88,7 @@ MYSQL_BIND *MysqlResultImpl::addRow()
             if (last[i].type() == JSON::value_t::string)
             {
                 std::string *s = last[i].get_ptr<JSON::string_t*>();
-                s->resize(std::strlen(s->c_str()));
+                s->resize(_len[i]);
             }
         }
         LOG_TRACE << _rowData[_rowsNum - 1].dump();
@@ -133,6 +133,7 @@ MYSQL_BIND *MysqlResultImpl::addRow()
 		case MYSQL_TYPE_STRING:
 			row[i] = std::string(_fieldArray[i].length,'\0');
             _binds.get()[i].buffer = (char *) (row[i].get_ptr<JSON::string_t*>())->c_str();
+            _binds.get()[i].length = &_len[i];
 		case MYSQL_TYPE_GEOMETRY:
 		    break;
 	    }

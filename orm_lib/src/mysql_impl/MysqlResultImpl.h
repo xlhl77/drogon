@@ -60,6 +60,7 @@ class MysqlResultImpl : public ResultImpl
 		            std::memset(&(_binds.get()[i]), 0 , sizeof(MYSQL_BIND));
                 _binds.get()[i].buffer_type = _fieldArray[i].type;
 	            	_binds.get()[i].buffer_length = _fieldArray[i].length;
+                _len.push_back(0);
             }
 
         }
@@ -86,6 +87,7 @@ class MysqlResultImpl : public ResultImpl
 
     JSON _rowData = JSON::array();
     std::shared_ptr<MYSQL_BIND> _binds;
+    std::vector<unsigned long> _len;
 };
 
 } // namespace orm
