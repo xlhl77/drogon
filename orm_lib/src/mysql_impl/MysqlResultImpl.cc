@@ -69,7 +69,7 @@ Result::field_size_type MysqlResultImpl::getLength(size_type row, row_size_type 
     assert(column < _fieldNum);
     return (_rowData[row][column].type()==JSON::value_t::string)
     ? _rowData[row][column].get<std::string>().size()
-    : _rowData[row][column].dump().size();;
+    : _rowData[row][column].dump().size();
 }
 unsigned long long MysqlResultImpl::insertId() const noexcept
 {
@@ -80,7 +80,18 @@ MYSQL_BIND *MysqlResultImpl::addRow()
 {
     _rowData.push_back(JSON::array());
     JSON &row = _rowData[_rowsNum];
-
+    if (_rowsNum > 0) 
+    {
+        for (auto &j : _rowData[_rowsNum - 1].items())
+        {
+            if (j.type() == JSON::value_t::string)
+            {
+                std::string *s = j.get_ptr<JSON::string_t>();
+                s->resize(std::strlen(s.c_str()));
+            }
+        }
+        LOG_TRACE << _rowData[_rowsNum - 1].dump();
+    }
     for (row_size_type i = 0; i < _fieldNum; i++)
     {
         switch (_fieldArray[i].type) {
@@ -125,7 +136,7 @@ MYSQL_BIND *MysqlResultImpl::addRow()
 		    break;
 	    }
     }
-    LOG_TRACE << _rowData.dump();
+    
     _rowsNum++;
     return _binds.get();
 }
