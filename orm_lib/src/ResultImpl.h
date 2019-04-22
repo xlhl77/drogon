@@ -36,6 +36,7 @@ class ResultImpl : public trantor::NonCopyable, public Result
     virtual const std::string &sql() const { return _query; }
     virtual unsigned long long insertId() const noexcept { return 0; }
     virtual int oid(row_size_type column) const { return 0; }
+    virtual bool toJson(json &result) const noexcept {return false; }
     virtual ~ResultImpl() {}
 
   private:

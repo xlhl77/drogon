@@ -74,6 +74,7 @@ class MysqlResultImpl : public ResultImpl
     virtual bool isNull(size_type row, row_size_type column) const override;
     virtual field_size_type getLength(size_type row, row_size_type column) const override;
     virtual unsigned long long insertId() const noexcept override;
+    virtual bool toJson(json &result) const noexcept override;
 
     MYSQL_BIND* addRow();
   private:

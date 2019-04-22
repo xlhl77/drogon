@@ -149,3 +149,17 @@ MYSQL_BIND *MysqlResultImpl::addRow()
     _rowsNum++;
     return _binds.get();
 }
+
+bool MysqlResultImpl::toJson(json &result) const noexcept
+{
+    result = json::array();
+    
+    for (auto i = 0; i < _rowsNum; i++)
+    {
+        json row = json::object();
+        for (auto j = 0 ; j < _fieldNum; j++)
+            row[_fieldArray[j].name] = _rowData[i][j];
+        result.push_back(row);
+    }
+    return true;
+}

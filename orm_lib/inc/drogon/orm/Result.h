@@ -16,7 +16,7 @@
 //The license for libpqxx can be found in the COPYING file.
 
 #pragma once
-
+#include <drogon/utils/json.hpp>
 #include <memory>
 #include <string>
 #ifdef _WIN32
@@ -108,6 +108,7 @@ class Result
     /// Query that produced this result, if available (empty string otherwise)
     const std::string &sql() const noexcept;
 
+    bool toJson(json &result) const noexcept;
   private:
     ResultImplPtr _resultPtr;
 
