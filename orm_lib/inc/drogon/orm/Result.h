@@ -17,6 +17,7 @@
 
 #pragma once
 #include <drogon/utils/json.hpp>
+using namespace nlohmann;
 #include <memory>
 #include <string>
 #ifdef _WIN32
