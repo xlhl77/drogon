@@ -212,7 +212,7 @@ if(USE_ORM)
     file(GLOB orm_headers "${CMAKE_CURRENT_SOURCE_DIR}/orm_lib/inc/drogon/orm/*.h")
     install(FILES ${orm_headers} DESTINATION include/drogon/orm)
 endif()
-file(GLOB drogon_util_headers "${CMAKE_CURRENT_SOURCE_DIR}/lib/inc/drogon/utils/*.h")
+file(GLOB drogon_util_headers "${CMAKE_CURRENT_SOURCE_DIR}/lib/inc/drogon/utils/*.h*")
 install(FILES ${drogon_util_headers}
         DESTINATION include/drogon/utils)
 file(GLOB drogon_plugin_headers "${CMAKE_CURRENT_SOURCE_DIR}/lib/inc/drogon/plugins/*.h")

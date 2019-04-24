@@ -53,9 +53,10 @@ const char *MysqlResultImpl::getValue(size_type row, row_size_type column) const
         return NULL;
     assert(row < _rowsNum);
     assert(column < _fieldNum);
-    return (_rowData[row][column].type()==JSON::value_t::string)
-    ? _rowData[row][column].get<std::string>().c_str()
-    : _rowData[row][column].dump().c_str();
+    const char *name = columnName(column);
+    return (_rowData[row][name].type()==JSON::value_t::string)
+    ? _rowData[row][name].get<std::string>().c_str()
+    : _rowData[row][name].dump().c_str();
 }
 bool MysqlResultImpl::isNull(size_type row, row_size_type column) const
 {
@@ -67,9 +68,10 @@ Result::field_size_type MysqlResultImpl::getLength(size_type row, row_size_type 
         return 0;
     assert(row < _rowsNum);
     assert(column < _fieldNum);
-    return (_rowData[row][column].type()==JSON::value_t::string)
-    ? _rowData[row][column].get<std::string>().size()
-    : _rowData[row][column].dump().size();
+    const char *name = columnName(column);
+    return (_rowData[row][name].type()==JSON::value_t::string)
+    ? _rowData[row][name].get<std::string>().size()
+    : _rowData[row][name].dump().size();
 }
 unsigned long long MysqlResultImpl::insertId() const noexcept
 {
@@ -78,43 +80,49 @@ unsigned long long MysqlResultImpl::insertId() const noexcept
 
 MYSQL_BIND *MysqlResultImpl::addRow()
 {
-    _rowData.push_back(JSON::array());
+    auto bind = _binds.get();
+
+    _rowData.push_back(JSON::object());
     JSON &row = _rowData[_rowsNum];
-    if (_rowsNum > 0 && _rowData[_rowsNum - 1].is_array()) 
+    if (_rowsNum > 0) 
     {
         JSON &last = _rowData[_rowsNum - 1];
-        for (row_size_type i = 0; i < _fieldNum; i++)
+        for (auto &[name,idx] :*_fieldMapPtr.get())
         {
-            if (last[i].type() == JSON::value_t::string)
+            if (last[name].type() == JSON::value_t::string)
             {
-                std::string *s = last[i].get_ptr<JSON::string_t*>();
-                s->resize(_len[i]);
+                std::string *s = last[name].get_ptr<JSON::string_t*>();
+                s->resize(_len[idx]);
             }
         }
-        LOG_TRACE << last.dump();
     }
-    for (row_size_type i = 0; i < _fieldNum; i++)
+    std::memset(bind, 0, _fieldNum);
+    for (auto &[name,i] :*_fieldMapPtr.get())
     {
         switch (_fieldArray[i].type) {
 		case MYSQL_TYPE_TINY:
 		case MYSQL_TYPE_SHORT:
 		case MYSQL_TYPE_LONG:
+		case MYSQL_TYPE_INT24:
+		case MYSQL_TYPE_LONGLONG:
         {
-			row[i] = 0;
-            _binds.get()[i].buffer = (char *)row[i].get_ptr<JSON::number_integer_t*>();
+			row[name] = 0;
+            bind[i].buffer = (char *)row[name].get_ptr<JSON::number_integer_t*>();
+	        bind[i].buffer_type = MYSQL_TYPE_LONG;
+	        bind[i].buffer_length = sizeof(json::number_integer_t);
 			break;
         }
 		case MYSQL_TYPE_FLOAT:
 		case MYSQL_TYPE_DOUBLE:
         {
-			row[i] = 0.0;
-            _binds.get()[i].buffer = (char *)row[i].get_ptr<JSON::number_float_t*>();
+			row[name] = 0.0;
+            bind[i].buffer = (char *)row[name].get_ptr<JSON::number_float_t*>();
+	        bind[i].buffer_type = MYSQL_TYPE_DOUBLE;
+	        bind[i].buffer_length = sizeof(double);
 			break;
         }
 		case MYSQL_TYPE_NULL:
 		case MYSQL_TYPE_TIMESTAMP:
-		case MYSQL_TYPE_LONGLONG:
-		case MYSQL_TYPE_INT24:
 		case MYSQL_TYPE_DATE:
 		case MYSQL_TYPE_TIME:
 		case MYSQL_TYPE_DATETIME:
@@ -136,30 +144,28 @@ MYSQL_BIND *MysqlResultImpl::addRow()
 		case MYSQL_TYPE_VAR_STRING:
 		case MYSQL_TYPE_STRING:
         {
-			row[i] = std::string(_fieldArray[i].length,'\0');
-            _binds.get()[i].buffer = (char *) (row[i].get_ptr<JSON::string_t*>())->c_str();
-            _binds.get()[i].length = &_len[i];
+			row[name] = std::string(_fieldArray[i].length,'\0');
+            bind[i].buffer = (char *) (row[name].get_ptr<JSON::string_t*>())->c_str();
             break;
         }
 		case MYSQL_TYPE_GEOMETRY:
 		    break;
 	    }
+        bind[i].length = &_len[i];
+
     }
     
     _rowsNum++;
-    return _binds.get();
+    return bind;
 }
 
 bool MysqlResultImpl::toJson(json &result) const noexcept
 {
     result = json::array();
     
-    for (auto i = 0; i < _rowsNum; i++)
+    for (auto i = 0; i < _rowsNum - 1; i++)
     {
-        json row = json::object();
-        for (auto j = 0 ; j < _fieldNum; j++)
-            row[_fieldArray[j].name] = _rowData[i][j];
-        result.push_back(row);
+        result.push_back(_rowData[i]);
     }
     return true;
 }
