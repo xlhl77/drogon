@@ -78,7 +78,7 @@ class HttpClient : public trantor::NonCopyable
                                        trantor::EventLoop *loop = nullptr);
 
     /// Get the event loop of the client;
-    virtual trantor::EventLoop *loop() = 0;
+    virtual trantor::EventLoop *getLoop() = 0;
 
     /// Use hostString to connect to server
     /** 
@@ -87,9 +87,9 @@ class HttpClient : public trantor::NonCopyable
      * http://www.baidu.com
      * https://127.0.0.1:8080/
      * http://127.0.0.1
+     * http://[::1]:8080/   //IPv6 address must be enclosed in [], rfc2732
      * 
      * The @param hostString must be prefixed by 'http://' or 'https://' 
-     * and doesn't support for ipv6 address if the host is in ip format
      * 
      * If the loop parameter is set to nullptr, the client 
      * uses the HttpAppFramework's event loop, otherwise it

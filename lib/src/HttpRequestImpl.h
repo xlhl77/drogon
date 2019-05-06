@@ -40,7 +40,7 @@ namespace drogon
 
 class HttpRequestImpl : public HttpRequest
 {
-  public:
+public:
     friend class HttpRequestParser;
 
     explicit HttpRequestImpl(trantor::EventLoop *loop)
@@ -59,7 +59,7 @@ class HttpRequestImpl : public HttpRequest
         _version = v;
     }
 
-    Version getVersion() const override
+    virtual Version version() const override
     {
         return _version;
     }
@@ -103,6 +103,16 @@ class HttpRequestImpl : public HttpRequest
             if (m == "DELETE")
             {
                 _method = Delete;
+            }
+            else
+            {
+                _method = Invalid;
+            }
+            break;
+        case 7:
+            if (m == "OPTIONS")
+            {
+                _method = Options;
             }
             else
             {
@@ -161,6 +171,9 @@ class HttpRequestImpl : public HttpRequest
         case Delete:
             result = "DELETE";
             break;
+        case Options:
+            result = "OPTIONS";
+            break;
         default:
             break;
         }
@@ -177,7 +190,7 @@ class HttpRequestImpl : public HttpRequest
         _path = path;
     }
 
-    virtual const std::unordered_map<std::string, std::string> &getParameters() const override
+    virtual const std::unordered_map<std::string, std::string> &parameters() const override
     {
         parseParametersOnce();
         return _parameters;
@@ -192,7 +205,7 @@ class HttpRequestImpl : public HttpRequest
         return defaultVal;
     }
 
-    const std::string &path() const override
+    virtual const std::string &path() const override
     {
         return _path;
     }
@@ -206,11 +219,13 @@ class HttpRequestImpl : public HttpRequest
     {
         _query = query;
     }
-    //            const string& content() const
-    //            {
-    //                return _content;
-    //            }
-    const std::string &query() const override
+
+    virtual const string &body() const override
+    {
+        return _content;
+    }
+
+    virtual const std::string &query() const override
     {
         if (_query != "")
             return _query;
@@ -358,7 +373,7 @@ class HttpRequestImpl : public HttpRequest
         _sessionPtr = session;
     }
 
-    virtual const std::shared_ptr<Json::Value> getJsonObject() const override
+    virtual const std::shared_ptr<Json::Value> jsonObject() const override
     {
         parseParametersOnce();
         return _jsonPtr;
@@ -377,15 +392,13 @@ class HttpRequestImpl : public HttpRequest
     //     setContentType(webContentTypeAndCharsetToString(type, charSet));
     // }
 
-    virtual ContentType getContentTypeCode() override
+    virtual ContentType contentType() const override
     {
         return _contentType;
     }
 
-    virtual const std::string &matchedPathPattern() const override
+    virtual const string_view &matchedPathPattern() const override
     {
-        if(_matchedPathPattern.empty())
-            return _path;
         return _matchedPathPattern;
     }
 
@@ -394,7 +407,7 @@ class HttpRequestImpl : public HttpRequest
         _matchedPathPattern = pathPattern;
     }
 
-  protected:
+protected:
     friend class HttpRequest;
     void setContentType(const std::string &contentType)
     {
@@ -405,7 +418,7 @@ class HttpRequestImpl : public HttpRequest
         _contentTypeString = std::move(contentType);
     }
 
-  private:
+private:
     void parseParameters() const;
     void parseParametersOnce() const
     {
@@ -420,7 +433,7 @@ class HttpRequestImpl : public HttpRequest
     HttpMethod _method;
     Version _version;
     std::string _path;
-    std::string _matchedPathPattern;
+    string_view _matchedPathPattern = "";
     std::string _query;
     std::unordered_map<std::string, std::string> _headers;
     std::unordered_map<std::string, std::string> _cookies;
@@ -431,7 +444,7 @@ class HttpRequestImpl : public HttpRequest
     trantor::InetAddress _local;
     trantor::Date _date;
 
-  protected:
+protected:
     std::string _content;
     size_t _contentLen;
     trantor::EventLoop *_loop;

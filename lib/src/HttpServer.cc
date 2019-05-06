@@ -66,7 +66,11 @@ static void defaultConnectionCallback(const trantor::TcpConnectionPtr &conn)
 HttpServer::HttpServer(EventLoop *loop,
                        const InetAddress &listenAddr,
                        const std::string &name)
+#ifdef __linux__
     : _server(loop, listenAddr, name.c_str()),
+#else
+    : _server(loop, listenAddr, name.c_str(), true, false),
+#endif
       _httpAsyncCallback(defaultHttpAsyncCallback),
       _newWebsocketCallback(defaultWebSockAsyncCallback),
       _connectionCallback(defaultConnectionCallback)
@@ -155,7 +159,6 @@ void HttpServer::onMessage(const TcpConnectionPtr &conn,
                                               if (resp->statusCode() == k101SwitchingProtocols)
                                               {
                                                   requestParser->setWebsockConnection(wsConn);
-                                                  
                                               }
                                               auto httpString = std::dynamic_pointer_cast<HttpResponseImpl>(resp)->renderToString();
                                               conn->send(httpString);
@@ -207,11 +210,11 @@ void HttpServer::onRequest(const TcpConnectionPtr &conn, const HttpRequestImplPt
         auto newResp = response;
         auto &sendfileName = std::dynamic_pointer_cast<HttpResponseImpl>(newResp)->sendfileName();
 
-        if (HttpAppFramework::instance().useGzip() &&
+        if (HttpAppFramework::instance().isGzipEnabled() &&
             sendfileName.empty() &&
             req->getHeaderBy("accept-encoding").find("gzip") != std::string::npos &&
-            std::dynamic_pointer_cast<HttpResponseImpl>(response)->getHeaderBy("content-encoding") == "" &&
-            response->getContentTypeCode() < CT_APPLICATION_OCTET_STREAM &&
+            std::dynamic_pointer_cast<HttpResponseImpl>(response)->getHeaderBy("content-encoding").empty() &&
+            response->getContentType() < CT_APPLICATION_OCTET_STREAM &&
             response->getBody().length() > 1024)
         {
             //use gzip
@@ -335,7 +338,7 @@ void HttpServer::sendResponse(const TcpConnectionPtr &conn,
         conn->send(httpString);
     }
 
-    if (response->closeConnection())
+    if (response->ifCloseConnection())
     {
         conn->shutdown();
     }

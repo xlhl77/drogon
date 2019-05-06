@@ -40,6 +40,7 @@
 #include <functional>
 #include <vector>
 #include <type_traits>
+#include <chrono>
 
 namespace drogon
 {
@@ -62,10 +63,12 @@ inline std::string getGitCommit()
 class HttpControllerBase;
 class HttpSimpleControllerBase;
 class WebSocketControllerBase;
+typedef std::function<void(const HttpResponsePtr &)> AdviceCallback;
+typedef std::function<void()> AdviceChainCallback;
 
 class HttpAppFramework : public trantor::NonCopyable
 {
-  public:
+public:
     virtual ~HttpAppFramework();
     ///Get the instance of HttpAppFramework
     /**
@@ -119,8 +122,8 @@ class HttpAppFramework : public trantor::NonCopyable
     ///Get the plugin object registered in the framework
     /**
      * NOTE:
-     * This method is usually called after the framework is run.
-     * Calling this method in the initAndStart() method of some plugins is also valid. 
+     * This method is usually called after the framework runs.
+     * Calling this method in the initAndStart() method of plugins is also valid. 
      */
     template <typename T>
     T *getPlugin()
@@ -135,10 +138,109 @@ class HttpAppFramework : public trantor::NonCopyable
      * @param name: is the class name of the plugin.
      * 
      * NOTE:
-     * This method is usually called after the framework is run.
-     * Calling this method in the initAndStart() method of some plugins is also valid. 
+     * This method is usually called after the framework runs.
+     * Calling this method in the initAndStart() method of plugins is also valid. 
      */
     virtual PluginBase *getPlugin(const std::string &name) = 0;
+
+    ///The following is a series of methods of AOP
+
+    ///The @param advice is called immediately after the main event loop runs.
+    virtual void registerBeginningAdvice(const std::function<void()> &advice) = 0;
+
+    ///The @param advice is called immediately when a new connection is established.
+    /**
+     * The first parameter of the @param advice is the remote address of the new connection, the second one
+     * is the local address of it.
+     * If the @param advice returns a false value, drogon closes the connection.
+     * Users can use this advice to implement some security policies.
+     */
+    virtual void registerNewConnectionAdvice(const std::function<bool(const trantor::InetAddress &, const trantor::InetAddress &)> &advice) = 0;
+
+    ///The @param advice is called immediately after the request is created and before it matches any handler paths.
+    /**
+     * The parameters of the @param advice are same as those of the doFilter method of the Filter class. 
+     * The following diagram shows the location of the AOP join points during http request processing.
+     * 
+     * 
+     *                     +-----------+                             +------------+
+     *                     |  Request  |                             |  Response  |
+     *                     +-----------+                             +------------+
+     *                           |                                         ^
+     *                           v                                         |
+     *    Pre-routing join point o----------->[Advice callback]----------->+
+     *                           |                                         |
+     *                           v         Invalid path                    |
+     *                     [Find Handler]---------------->[404]----------->+
+     *                           |                                         |
+     *                           v                                         |
+     *   Post-routing join point o----------->[Advice callback]----------->+
+     *                           |                                         |
+     *                           v        Invalid method                   |
+     *                     [Check Method]---------------->[405]----------->+
+     *                           |                                         |
+     *                           v                                         |
+     *                       [Filters]------->[Filter callback]----------->+
+     *                           |                                         |
+     *                           v             Y                           |
+     *                  [Is OPTIONS method?]------------->[200]----------->+
+     *                           |                                         |
+     *                           v                                         |
+     *   Pre-handling join point o----------->[Advice callback]----------->+
+     *                           |                                         |
+     *                           v                                         |
+     *                       [Handler]                                     |
+     *                           |                                         |
+     *                           v                                         |
+     *  Post-handling join point o---------------------------------------->+
+     * 
+     */
+    virtual void registerPreRoutingAdvice(const std::function<void(const HttpRequestPtr &,
+                                                                   const AdviceCallback &,
+                                                                   const AdviceChainCallback &)> &advice) = 0;
+
+    ///The @param advice is called at the same time as the above advice. It can be thought of as an observer who cannot respond to http requests.
+    /**
+     * This advice has less overhead than the above one. 
+     * If one does not intend to intercept the http request, please use this interface.
+     */
+    virtual void registerPreRoutingAdvice(const std::function<void(const HttpRequestPtr &)> &advice) = 0;
+
+    ///The @param advice is called immediately after the request matchs a handler path
+    ///and before any 'doFilter' method of filters applies.
+    /**
+     * The parameters of the @param advice are same as those of the doFilter method of the Filter class. 
+     */
+    virtual void registerPostRoutingAdvice(const std::function<void(const HttpRequestPtr &,
+                                                                    const AdviceCallback &,
+                                                                    const AdviceChainCallback &)> &advice) = 0;
+
+    ///The @param advice is called at the same time as the above advice. It can be thought of as an observer who cannot respond to http requests.
+    /**
+     * This advice has less overhead than the above one. 
+     * If one does not intend to intercept the http request, please use this interface.
+     */
+    virtual void registerPostRoutingAdvice(const std::function<void(const HttpRequestPtr &)> &advice) = 0;
+
+    ///The @param advice is called immediately after the request is approved by all filters and before it is handled.
+    /**
+     * The parameters of the @param advice are same as those of the doFilter method of the Filter class. 
+     */
+    virtual void registerPreHandlingAdvice(const std::function<void(const HttpRequestPtr &,
+                                                                    const AdviceCallback &,
+                                                                    const AdviceChainCallback &)> &advice) = 0;
+
+    ///The @param advice is called at the same time as the above advice. It can be thought of as an observer who cannot respond to http requests.
+    /**
+     * This advice has less overhead than the above one. 
+     * If one does not intend to intercept the http request, please use this interface.
+     */
+    virtual void registerPreHandlingAdvice(const std::function<void(const HttpRequestPtr &)> &advice) = 0;
+
+    ///The @param advice is called immediately after the request is handled and a response object is created by handlers.
+    virtual void registerPostHandlingAdvice(const std::function<void(const HttpRequestPtr &, const HttpResponsePtr &)> &advice) = 0;
+
+    ///End of AOP methods
 
     ///Load the configuration file with json format.
     virtual void loadConfigFile(const std::string &fileName) = 0;
@@ -187,7 +289,8 @@ class HttpAppFramework : public trantor::NonCopyable
     template <typename FUNCTION>
     void registerHandler(const std::string &pathPattern,
                          FUNCTION &&function,
-                         const std::vector<any> &filtersAndMethods = std::vector<any>())
+                         const std::vector<any> &filtersAndMethods = std::vector<any>(),
+                         const std::string &handlerName = "")
     {
         LOG_TRACE << "pathPattern:" << pathPattern;
         internal::HttpBinderBasePtr binder;
@@ -218,7 +321,7 @@ class HttpAppFramework : public trantor::NonCopyable
                 exit(1);
             }
         }
-        registerHttpController(pathPattern, binder, validMethods, filters);
+        registerHttpController(pathPattern, binder, validMethods, filters, handlerName);
     }
 
     /// Register a WebSocketController into the framework.
@@ -276,6 +379,13 @@ class HttpAppFramework : public trantor::NonCopyable
         DrClassMap::setSingleInstance(filterPtr);
     }
 
+    ///Get information about the handlers registered to drogon
+    /**
+     * The first item of std::tuple in the return value represents the path pattern of the handler;
+     * The last item in std::tuple is the description of the handler. 
+     */
+    virtual std::vector<std::tuple<std::string, HttpMethod, std::string>> getHandlersInfo() const = 0;
+
     ///Get the custom configuration defined by users in the configuration file.
     virtual const Json::Value &getCustomConfig() const = 0;
 
@@ -325,6 +435,17 @@ class HttpAppFramework : public trantor::NonCopyable
      * This operation can be performed by an option in the configuration file.
      */
     virtual void enableSession(const size_t timeout = 0) = 0;
+
+    ///A wrapper of the above method.
+    /**
+     * Users can set the timeout value as follows:
+     *   app().enableSession(0.2h);
+     *   app().enableSession(12min); 
+     */
+    inline void enableSession(const std::chrono::duration<long double> &timeout)
+    {
+        enableSession((size_t)timeout.count());
+    }
 
     ///Disable sessions supporting.
     /** 
@@ -456,7 +577,7 @@ class HttpAppFramework : public trantor::NonCopyable
     virtual void enableGzip(bool useGzip) = 0;
 
     ///Return true if gzip is enabled.
-    virtual bool useGzip() const = 0;
+    virtual bool isGzipEnabled() const = 0;
 
     ///Set the time in which the static file response is cached in memory.
     /**
@@ -472,12 +593,23 @@ class HttpAppFramework : public trantor::NonCopyable
 
     ///Set the lifetime of the connection without read or write
     /**
-     * @param timeout: in seconds. 60 by default.
+     * @param timeout: in seconds. 60 by default. Setting the timeout to 0 means that drogon does not close idle connections.
      * 
      * NOTE:
      * This operation can be performed by an option in the configuration file.
      */
     virtual void setIdleConnectionTimeout(size_t timeout) = 0;
+
+    ///A wrapper of the above method.
+    /**
+     * Users can set the timeout value as follows:
+     *   app().setIdleConnectionTimeout(0.5h);
+     *   app().setIdleConnectionTimeout(30min); 
+     */
+    inline void setIdleConnectionTimeout(const std::chrono::duration<long double> &timeout)
+    {
+        setIdleConnectionTimeout((size_t)timeout.count());
+    }
 
     ///Set the 'server' header field in each response sent by drogon.
     /**
@@ -489,7 +621,7 @@ class HttpAppFramework : public trantor::NonCopyable
      */
     virtual void setServerHeaderField(const std::string &server) = 0;
 
-    ///Sets the maximum number of requests that can be served through one keep-alive connection.
+    ///Set the maximum number of requests that can be served through one keep-alive connection.
     /**
      * After the maximum number of requests are made, the connection is closed. The default value is
      * 0 which means no limit.
@@ -499,7 +631,7 @@ class HttpAppFramework : public trantor::NonCopyable
      */
     virtual void setKeepaliveRequestsNumber(const size_t number) = 0;
 
-    ///Sets the maximum number of unhandled requests that can be cached in pipelining buffer.
+    ///Set the maximum number of unhandled requests that can be cached in pipelining buffer.
     /**
      * The default value of 0 means no limit.
      * After the maximum number of requests cached in pipelining buffer are made, the connection is closed.
@@ -508,6 +640,17 @@ class HttpAppFramework : public trantor::NonCopyable
      * This operation can be performed by an option in the configuration file.
      */
     virtual void setPipeliningRequestsNumber(const size_t number) = 0;
+
+    ///Set the gzip_static option.
+    /**
+     * If it is set to true, when the client requests a static file, drogon first finds the compressed
+     * file with the extension ".gz" in the same path and send the compressed file to the client.
+     * The default value is true.
+     * 
+     * NOTE:
+     * This operation can be performed by an option in the configuration file.
+     */
+    virtual void setGzipStatic(bool useGzipStatic) = 0;
 
 #if USE_ORM
     ///Get a database client by @param name
@@ -550,11 +693,12 @@ class HttpAppFramework : public trantor::NonCopyable
                                 const bool isFast = false) = 0;
 #endif
 
-  private:
+private:
     virtual void registerHttpController(const std::string &pathPattern,
                                         const internal::HttpBinderBasePtr &binder,
                                         const std::vector<HttpMethod> &validMethods = std::vector<HttpMethod>(),
-                                        const std::vector<std::string> &filters = std::vector<std::string>()) = 0;
+                                        const std::vector<std::string> &filters = std::vector<std::string>(),
+                                        const std::string &handlerName = "") = 0;
 };
 
 inline HttpAppFramework &app()

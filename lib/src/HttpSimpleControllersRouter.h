@@ -15,6 +15,7 @@
 #pragma once
 #include "HttpRequestImpl.h"
 #include "HttpResponseImpl.h"
+#include "HttpControllersRouter.h"
 #include <drogon/HttpSimpleController.h>
 #include <trantor/utils/NonCopyable.h>
 #include <drogon/HttpBinder.h>
@@ -30,13 +31,34 @@
 namespace drogon
 {
 
-class HttpAppFrameworkImpl;
-class HttpControllersRouter;
 class HttpSimpleControllersRouter : public trantor::NonCopyable
 {
   public:
-    explicit HttpSimpleControllersRouter(HttpControllersRouter &httpCtrlRouter)
-        : _httpCtrlsRouter(httpCtrlRouter) {}
+    HttpSimpleControllersRouter(HttpControllersRouter &httpCtrlRouter,
+                                const std::deque<std::function<void(const HttpRequestPtr &,
+                                                                    const AdviceCallback &,
+                                                                    const AdviceChainCallback &)>>
+                                    &postRoutingAdvices,
+                                const std::deque<std::function<void(const HttpRequestPtr &)>>
+                                    &postRoutingObservers,
+                                const std::vector<std::function<void(const HttpRequestPtr &,
+                                                                     const AdviceCallback &,
+                                                                     const AdviceChainCallback &)>>
+                                    &preHandlingAdvices,
+                                const std::vector<std::function<void(const HttpRequestPtr &)>>
+                                    &preHandlingObservers,
+                                const std::deque<std::function<void(const HttpRequestPtr &,
+                                                                    const HttpResponsePtr &)>>
+                                    &postHandlingAdvices)
+        : _httpCtrlsRouter(httpCtrlRouter),
+          _postRoutingAdvices(postRoutingAdvices),
+          _preHandlingAdvices(preHandlingAdvices),
+          _postRoutingObservers(postRoutingObservers),
+          _preHandlingObservers(preHandlingObservers),
+          _postHandlingAdvices(postHandlingAdvices)
+    {
+    }
+
     void registerHttpSimpleController(const std::string &pathName,
                                       const std::string &ctrlName,
                                       const std::vector<any> &filtersAndMethods);
@@ -46,26 +68,65 @@ class HttpSimpleControllersRouter : public trantor::NonCopyable
                std::string &&sessionId);
     void init(const std::vector<trantor::EventLoop *> &ioLoops);
 
-  private:
+    std::vector<std::tuple<std::string, HttpMethod, std::string>> getHandlersInfo() const;
+
+private:
     HttpControllersRouter &_httpCtrlsRouter;
-    struct SimpleControllerRouterItem
+    const std::deque<std::function<void(const HttpRequestPtr &,
+                                        const AdviceCallback &,
+                                        const AdviceChainCallback &)>>
+        &_postRoutingAdvices;
+    const std::vector<std::function<void(const HttpRequestPtr &,
+                                         const AdviceCallback &,
+                                         const AdviceChainCallback &)>>
+        &_preHandlingAdvices;
+    const std::deque<std::function<void(const HttpRequestPtr &)>>
+        &_postRoutingObservers;
+    const std::vector<std::function<void(const HttpRequestPtr &)>>
+        &_preHandlingObservers;
+
+    const std::deque<std::function<void(const HttpRequestPtr &,
+                                        const HttpResponsePtr &)>>
+        &_postHandlingAdvices;
+    struct CtrlBinder
     {
+        std::shared_ptr<HttpSimpleControllerBase> _controller;
         std::string _controllerName;
         std::vector<std::string> _filterNames;
         std::vector<std::shared_ptr<HttpFilterBase>> _filters;
-        std::vector<int> _validMethodsFlags;
-        std::shared_ptr<HttpSimpleControllerBase> _controller;
         std::map<trantor::EventLoop *, std::shared_ptr<HttpResponse>> _responsePtrMap;
-        //std::atomic<bool> _mutex = ATOMIC_VAR_INIT(false);
-        //std::atomic_flag _mutex = ATOMIC_FLAG_INIT;
+        bool _isCORS = false;
+    };
+    typedef std::shared_ptr<CtrlBinder> CtrlBinderPtr;
+
+    struct SimpleControllerRouterItem
+    {
+        CtrlBinderPtr _binders[Invalid] = {nullptr};
     };
     std::unordered_map<std::string, SimpleControllerRouterItem> _simpCtrlMap;
     std::mutex _simpCtrlMutex;
 
-    void doControllerHandler(SimpleControllerRouterItem &item,
+    void doPreHandlingAdvices(const CtrlBinderPtr &ctrlBinderPtr,
+                              const SimpleControllerRouterItem &routerItem,
+                              const HttpRequestImplPtr &req,
+                              std::function<void(const HttpResponsePtr &)> &&callback,
+                              bool needSetJsessionid,
+                              std::string &&sessionId);
+    void doControllerHandler(const CtrlBinderPtr &ctrlBinderPtr,
+                             const SimpleControllerRouterItem &routerItem,
                              const HttpRequestImplPtr &req,
                              std::function<void(const HttpResponsePtr &)> &&callback,
                              bool needSetJsessionid,
                              std::string &&sessionId);
+    void invokeCallback(const std::function<void(const HttpResponsePtr &)> &callback,
+                        const HttpRequestImplPtr &req,
+                        const HttpResponsePtr &resp)
+    {
+        for (auto &advice : _postHandlingAdvices)
+        {
+            advice(req,resp);
+        }
+        callback(resp);
+    }
 };
 } // namespace drogon
