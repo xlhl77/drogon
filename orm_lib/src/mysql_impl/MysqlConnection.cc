@@ -325,6 +325,10 @@ bool MysqlConnection::onEventConnect(int status)
             return false;
         }
         _status = ConnectStatus_Ok;
+
+        //设置字符集
+        mysql_set_character_set(_mysqlPtr.get(), "utf8");
+        
         if (_okCb)
         {
             auto thisPtr = shared_from_this();

@@ -58,9 +58,12 @@ class MysqlResultImpl : public ResultImpl
                 // _offset.push_back({_fieldArray[i].length, len});
                 // len += _fieldArray[i].length;
 		            std::memset(&(_binds.get()[i]), 0 , sizeof(MYSQL_BIND));
+                _len.push_back(0);
+                _isNULL.push_back(false);
                 _binds.get()[i].buffer_type = _fieldArray[i].type;
 	            	_binds.get()[i].buffer_length = _fieldArray[i].length;
-                _len.push_back(0);
+                _binds.get()[i].is_null = (my_bool *)(&_isNULL[i]);
+                _binds.get()[i].length = &_len[i];
             }
 
         }
@@ -74,10 +77,11 @@ class MysqlResultImpl : public ResultImpl
     virtual bool isNull(size_type row, row_size_type column) const override;
     virtual field_size_type getLength(size_type row, row_size_type column) const override;
     virtual unsigned long long insertId() const noexcept override;
-    virtual bool toJson(json &result) const noexcept override;
+    virtual bool toJson(json &result) noexcept override;
 
     MYSQL_BIND* addRow();
   private:
+    void  processRow(int nRow);
     const std::shared_ptr<MYSQL_RES> _result;
     Result::size_type _rowsNum;
     const MYSQL_FIELD *_fieldArray;
@@ -89,6 +93,7 @@ class MysqlResultImpl : public ResultImpl
     JSON _rowData = JSON::array();
     std::shared_ptr<MYSQL_BIND> _binds;
     std::vector<unsigned long> _len;
+    std::vector<my_bool> _isNULL;
 };
 
 } // namespace orm
