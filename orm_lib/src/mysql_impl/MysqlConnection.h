@@ -15,36 +15,38 @@
 #pragma once
 
 #include "../DbConnection.h"
-#include "MysqlResultImpl.h"
-#include <trantor/net/EventLoop.h>
-#include <trantor/net/inner/Channel.h>
 #include <drogon/orm/DbClient.h>
-#include <trantor/utils/NonCopyable.h>
-#include <mysql.h>
-#include <memory>
-#include <string>
 #include <functional>
 #include <iostream>
+#include <memory>
+#include <mysql.h>
+#include <string>
+#include <trantor/net/EventLoop.h>
+#include <trantor/net/inner/Channel.h>
+#include <trantor/utils/NonCopyable.h>
 
 namespace drogon
 {
 namespace orm
 {
-
 class MysqlConnection;
 typedef std::shared_ptr<MysqlConnection> MysqlConnectionPtr;
-class MysqlConnection : public DbConnection, public std::enable_shared_from_this<MysqlConnection>
+class MysqlConnection : public DbConnection,
+                        public std::enable_shared_from_this<MysqlConnection>
 {
   public:
     MysqlConnection(trantor::EventLoop *loop, const std::string &connInfo);
-    ~MysqlConnection() {}
+    ~MysqlConnection()
+    {
+    }
     virtual void execSql(std::string &&sql,
                          size_t paraNum,
                          std::vector<const char *> &&parameters,
                          std::vector<int> &&length,
                          std::vector<int> &&format,
                          ResultCallback &&rcb,
-                         std::function<void(const std::exception_ptr &)> &&exceptCallback) override
+                         std::function<void(const std::exception_ptr &)>
+                             &&exceptCallback) override
     {
         if (_loop->isInLoopThread())
         {
@@ -59,22 +61,23 @@ class MysqlConnection : public DbConnection, public std::enable_shared_from_this
         else
         {
             auto thisPtr = shared_from_this();
-            _loop->queueInLoop([thisPtr,
-                                sql = std::move(sql),
-                                paraNum,
-                                parameters = std::move(parameters),
-                                length = std::move(length),
-                                format = std::move(format),
-                                rcb = std::move(rcb),
-                                exceptCallback = std::move(exceptCallback)]() mutable {
-                thisPtr->execSqlInLoop(std::move(sql),
-                                       paraNum,
-                                       std::move(parameters),
-                                       std::move(length),
-                                       std::move(format),
-                                       std::move(rcb),
-                                       std::move(exceptCallback));
-            });
+            _loop->queueInLoop(
+                [thisPtr,
+                 sql = std::move(sql),
+                 paraNum,
+                 parameters = std::move(parameters),
+                 length = std::move(length),
+                 format = std::move(format),
+                 rcb = std::move(rcb),
+                 exceptCallback = std::move(exceptCallback)]() mutable {
+                    thisPtr->execSqlInLoop(std::move(sql),
+                                           paraNum,
+                                           std::move(parameters),
+                                           std::move(length),
+                                           std::move(format),
+                                           std::move(rcb),
+                                           std::move(exceptCallback));
+                });
         }
     }
     virtual void disconnect() override;
@@ -129,5 +132,5 @@ class MysqlConnection : public DbConnection, public std::enable_shared_from_this
 
 };
 
-} // namespace orm
-} // namespace drogon
+}  // namespace orm
+}  // namespace drogon

@@ -13,39 +13,40 @@
  */
 
 #include "MysqlConnection.h"
-#include <drogon/utils/Utilities.h>
-#include <regex>
+#include "MysqlResultImpl.h"
 #include <algorithm>
+#include <drogon/utils/Utilities.h>
 #include <poll.h>
+#include <regex>
 
 using namespace drogon::orm;
 namespace drogon
 {
 namespace orm
 {
-
-Result makeResult(const std::shared_ptr<MYSQL_RES> &r = std::shared_ptr<MYSQL_RES>(nullptr),
-                  const std::string &query = "",
-                  Result::size_type affectedRows = 0,
-                  unsigned long long insertId = 0)
+Result makeResult(
+    const std::shared_ptr<MYSQL_RES> &r = std::shared_ptr<MYSQL_RES>(nullptr),
+    const std::string &query = "",
+    Result::size_type affectedRows = 0,
+    unsigned long long insertId = 0)
 {
-    return Result(std::make_shared<MysqlResultImpl>(r, query, affectedRows, insertId));
+    return Result(std::shared_ptr<MysqlResultImpl>(
+        new MysqlResultImpl(r, query, affectedRows, insertId)));
 }
 
-} // namespace orm
-} // namespace drogon
+}  // namespace orm
+}  // namespace drogon
 
-MysqlConnection::MysqlConnection(trantor::EventLoop *loop, const std::string &connInfo)
+MysqlConnection::MysqlConnection(trantor::EventLoop *loop,
+                                 const std::string &connInfo)
     : DbConnection(loop),
-      _mysqlPtr(std::shared_ptr<MYSQL>(new MYSQL, [](MYSQL *p) {
-          mysql_close(p);
-      })),
-      _stmtPtr(nullptr)
+      _mysqlPtr(
+          std::shared_ptr<MYSQL>(new MYSQL, [](MYSQL *p) { mysql_close(p); }))
 {
     mysql_init(_mysqlPtr.get());
     mysql_options(_mysqlPtr.get(), MYSQL_OPT_NONBLOCK, 0);
 
-    //Get the key and value
+    // Get the key and value
     std::regex r(" *= *");
     auto tmpStr = std::regex_replace(connInfo, r, "=");
     std::string host, user, passwd, dbname, port;
@@ -61,7 +62,7 @@ MysqlConnection::MysqlConnection(trantor::EventLoop *loop, const std::string &co
             value = value.substr(1, value.length() - 2);
         }
         std::transform(key.begin(), key.end(), key.begin(), tolower);
-        //LOG_TRACE << key << "=" << value;
+        // LOG_TRACE << key << "=" << value;
         if (key == "host")
         {
             host = value;
@@ -72,7 +73,7 @@ MysqlConnection::MysqlConnection(trantor::EventLoop *loop, const std::string &co
         }
         else if (key == "dbname")
         {
-            //LOG_DEBUG << "database:[" << value << "]";
+            // LOG_DEBUG << "database:[" << value << "]";
             dbname = value;
         }
         else if (key == "port")
@@ -87,25 +88,25 @@ MysqlConnection::MysqlConnection(trantor::EventLoop *loop, const std::string &co
     _loop->queueInLoop([=]() {
         MYSQL *ret;
         _status = ConnectStatus_Connecting;
-        _waitStatus = mysql_real_connect_start(&ret,
-                                               _mysqlPtr.get(),
-                                               host.empty() ? NULL : host.c_str(),
-                                               user.empty() ? NULL : user.c_str(),
-                                               passwd.empty() ? NULL : passwd.c_str(),
-                                               dbname.empty() ? NULL : dbname.c_str(),
-                                               port.empty() ? 3306 : atol(port.c_str()),
-                                               NULL,
-                                               0);
-        //LOG_DEBUG << ret;
+        _waitStatus =
+            mysql_real_connect_start(&ret,
+                                     _mysqlPtr.get(),
+                                     host.empty() ? NULL : host.c_str(),
+                                     user.empty() ? NULL : user.c_str(),
+                                     passwd.empty() ? NULL : passwd.c_str(),
+                                     dbname.empty() ? NULL : dbname.c_str(),
+                                     port.empty() ? 3306 : atol(port.c_str()),
+                                     NULL,
+                                     0);
+        // LOG_DEBUG << ret;
         auto fd = mysql_get_socket(_mysqlPtr.get());
-        _channelPtr = std::unique_ptr<trantor::Channel>(new trantor::Channel(loop, fd));
+        _channelPtr =
+            std::unique_ptr<trantor::Channel>(new trantor::Channel(loop, fd));
         _channelPtr->setCloseCallback([=]() {
             perror("sock close");
             handleClosed();
         });
-        _channelPtr->setEventCallback([=]() {
-            handleEvent();
-        });
+        _channelPtr->setEventCallback([=]() { handleEvent(); });
         setChannel();
     });
 }
@@ -131,9 +132,7 @@ void MysqlConnection::setChannel()
     {
         auto timeout = mysql_get_timeout_value(_mysqlPtr.get());
         auto thisPtr = shared_from_this();
-        _loop->runAfter(timeout, [thisPtr]() {
-            thisPtr->handleTimeout();
-        });
+        _loop->runAfter(timeout, [thisPtr]() { thisPtr->handleTimeout(); });
     }
 }
 
@@ -171,7 +170,7 @@ void MysqlConnection::handleTimeout()
 
     if (_status == ConnectStatus_Connecting)
     {
-        if (!onEventConnect(status))
+        if (!onEventConnect(status)) return;
         setChannel();
     }
     else if (_status == ConnectStatus_Ok)
@@ -237,13 +236,14 @@ void MysqlConnection::handleEvent()
     }
 }
 
-void MysqlConnection::execSqlInLoop(std::string &&sql,
-                                    size_t paraNum,
-                                    std::vector<const char *> &&parameters,
-                                    std::vector<int> &&length,
-                                    std::vector<int> &&format,
-                                    ResultCallback &&rcb,
-                                    std::function<void(const std::exception_ptr &)> &&exceptCallback)
+void MysqlConnection::execSqlInLoop(
+    std::string &&sql,
+    size_t paraNum,
+    std::vector<const char *> &&parameters,
+    std::vector<int> &&length,
+    std::vector<int> &&format,
+    ResultCallback &&rcb,
+    std::function<void(const std::exception_ptr &)> &&exceptCallback)
 {
     LOG_TRACE << sql;
     assert(paraNum == parameters.size());
@@ -274,17 +274,15 @@ void MysqlConnection::execSqlInLoop(std::string &&sql,
 void MysqlConnection::outputError()
 {
     _channelPtr->disableAll();
-    LOG_ERROR << "Error("
-              << mysql_errno(_mysqlPtr.get()) << ") [" << mysql_sqlstate(_mysqlPtr.get()) << "] \""
+    LOG_ERROR << "Error(" << mysql_errno(_mysqlPtr.get()) << ") ["
+              << mysql_sqlstate(_mysqlPtr.get()) << "] \""
               << mysql_error(_mysqlPtr.get()) << "\"";
     if (_isWorking)
     {
-
         try
         {
-            //TODO: exception type
-            throw SqlError(mysql_error(_mysqlPtr.get()),
-                           _sql);
+            // TODO: exception type
+            throw SqlError(mysql_error(_mysqlPtr.get()), _sql);
         }
         catch (...)
         {

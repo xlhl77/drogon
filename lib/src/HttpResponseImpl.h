@@ -2,7 +2,7 @@
  *
  *  HttpResponseImpl.h
  *  An Tao
- *  
+ *
  *  Copyright 2018, An Tao.  All rights reserved.
  *  https://github.com/an-tao/drogon
  *  Use of this source code is governed by a MIT license
@@ -15,16 +15,16 @@
 #pragma once
 
 #include "HttpUtils.h"
+#include <atomic>
 #include <drogon/HttpResponse.h>
-#include <trantor/utils/MsgBuffer.h>
-#include <trantor/net/InetAddress.h>
-#include <trantor/utils/Date.h>
 #include <drogon/utils/Utilities.h>
-#include <unordered_map>
-#include <string>
 #include <memory>
 #include <mutex>
-#include <atomic>
+#include <string>
+#include <trantor/net/InetAddress.h>
+#include <trantor/utils/Date.h>
+#include <trantor/utils/MsgBuffer.h>
+#include <unordered_map>
 
 using namespace trantor;
 namespace drogon
@@ -71,7 +71,8 @@ class HttpResponseImpl : public HttpResponse
         setStatusMessage(statusCodeToString(code));
     }
 
-    // virtual void setStatusCode(HttpStatusCode code, const std::string &status_message) override
+    // virtual void setStatusCode(HttpStatusCode code, const std::string
+    // &status_message) override
     // {
     //     _statusCode = code;
     //     setStatusMessage(status_message);
@@ -98,7 +99,8 @@ class HttpResponseImpl : public HttpResponse
         setContentType(webContentTypeToString(type));
     }
 
-    // virtual void setContentTypeCodeAndCharacterSet(ContentType type, const std::string &charSet = "utf-8") override
+    // virtual void setContentTypeCodeAndCharacterSet(ContentType type, const
+    // std::string &charSet = "utf-8") override
     // {
     //     _contentType = type;
     //     setContentType(webContentTypeAndCharsetToString(type, charSet));
@@ -109,25 +111,45 @@ class HttpResponseImpl : public HttpResponse
         return _contentType;
     }
 
-    virtual const std::string &getHeader(const std::string &key, const std::string &defaultVal = std::string()) const override
+    virtual const std::string &getHeader(
+        const std::string &key,
+        const std::string &defaultVal = std::string()) const override
     {
         auto field = key;
         transform(field.begin(), field.end(), field.begin(), ::tolower);
         return getHeaderBy(field, defaultVal);
     }
 
-    virtual const std::string &getHeader(std::string &&key, const std::string &defaultVal = std::string()) const override
+    virtual const std::string &getHeader(
+        std::string &&key,
+        const std::string &defaultVal = std::string()) const override
     {
         transform(key.begin(), key.end(), key.begin(), ::tolower);
         return getHeaderBy(key, defaultVal);
     }
 
-    virtual const std::unordered_map<std::string, std::string> &headers() const override
+    virtual void removeHeader(const std::string &key) override
+    {
+        auto field = key;
+        transform(field.begin(), field.end(), field.begin(), ::tolower);
+        removeHeaderBy(field);
+    }
+
+    virtual void removeHeader(std::string &&key) override
+    {
+        transform(key.begin(), key.end(), key.begin(), ::tolower);
+        removeHeaderBy(key);
+    }
+
+    virtual const std::unordered_map<std::string, std::string> &headers()
+        const override
     {
         return _headers;
     }
 
-    const std::string &getHeaderBy(const std::string &lowerKey, const std::string &defaultVal = std::string()) const
+    const std::string &getHeaderBy(
+        const std::string &lowerKey,
+        const std::string &defaultVal = std::string()) const
     {
         auto iter = _headers.find(lowerKey);
         if (iter == _headers.end())
@@ -137,7 +159,13 @@ class HttpResponseImpl : public HttpResponse
         return iter->second;
     }
 
-    virtual void addHeader(const std::string &key, const std::string &value) override
+    void removeHeaderBy(const std::string &lowerKey)
+    {
+        _headers.erase(lowerKey);
+    }
+
+    virtual void addHeader(const std::string &key,
+                           const std::string &value) override
     {
         _fullHeaderString.reset();
         auto field = key;
@@ -171,7 +199,7 @@ class HttpResponseImpl : public HttpResponse
 
         if (field == "set-cookie")
         {
-            //LOG_INFO<<"cookies!!!:"<<value;
+            // LOG_INFO<<"cookies!!!:"<<value;
             auto values = utils::splitString(value, ";");
             Cookie cookie;
             cookie.setHttpOnly(false);
@@ -185,7 +213,8 @@ class HttpResponseImpl : public HttpResponse
                 {
                     cookie_name = coo.substr(0, epos);
                     std::string::size_type cpos = 0;
-                    while (cpos < cookie_name.length() && isspace(cookie_name[cpos]))
+                    while (cpos < cookie_name.length() &&
+                           isspace(cookie_name[cpos]))
                         cpos++;
                     cookie_name = cookie_name.substr(cpos);
                     cookie_value = coo.substr(epos + 1);
@@ -204,7 +233,10 @@ class HttpResponseImpl : public HttpResponse
                 }
                 else
                 {
-                    std::transform(cookie_name.begin(), cookie_name.end(), cookie_name.begin(), tolower);
+                    std::transform(cookie_name.begin(),
+                                   cookie_name.end(),
+                                   cookie_name.begin(),
+                                   tolower);
                     if (cookie_name == "path")
                     {
                         cookie.setPath(cookie_value);
@@ -238,17 +270,20 @@ class HttpResponseImpl : public HttpResponse
         }
     }
 
-    virtual void addCookie(const std::string &key, const std::string &value) override
+    virtual void addCookie(const std::string &key,
+                           const std::string &value) override
     {
-        _cookies.insert(std::make_pair(key, Cookie(key, value)));
+        _cookies[key] = Cookie(key, value);
     }
 
     virtual void addCookie(const Cookie &cookie) override
     {
-        _cookies.insert(std::make_pair(cookie.key(), cookie));
+        _cookies[cookie.key()] = cookie;
     }
 
-    virtual const Cookie &getCookie(const std::string &key, const Cookie &defaultCookie = Cookie()) const override
+    virtual const Cookie &getCookie(
+        const std::string &key,
+        const Cookie &defaultCookie = Cookie()) const override
     {
         auto it = _cookies.find(key);
         if (it != _cookies.end())
@@ -258,7 +293,8 @@ class HttpResponseImpl : public HttpResponse
         return defaultCookie;
     }
 
-    virtual const std::unordered_map<std::string, Cookie> &cookies() const override
+    virtual const std::unordered_map<std::string, Cookie> &cookies()
+        const override
     {
         return _cookies;
     }
@@ -302,7 +338,10 @@ class HttpResponseImpl : public HttpResponse
         _expriedTime = expiredTime;
     }
 
-    virtual ssize_t expiredTime() const override { return _expriedTime; }
+    virtual ssize_t expiredTime() const override
+    {
+        return _expriedTime;
+    }
 
     //	void setReceiveTime(trantor::Date t)
     //    {
@@ -337,15 +376,19 @@ class HttpResponseImpl : public HttpResponse
     }
     void parseJson() const
     {
-        //parse json data in reponse
+        // parse json data in reponse
         _jsonPtr = std::make_shared<Json::Value>();
         Json::CharReaderBuilder builder;
         builder["collectComments"] = false;
         JSONCPP_STRING errs;
         std::unique_ptr<Json::CharReader> reader(builder.newCharReader());
-        if (!reader->parse(_bodyPtr->data(), _bodyPtr->data() + _bodyPtr->size(), _jsonPtr.get(), &errs))
+        if (!reader->parse(_bodyPtr->data(),
+                           _bodyPtr->data() + _bodyPtr->size(),
+                           _jsonPtr.get(),
+                           &errs))
         {
             LOG_ERROR << errs;
+            LOG_DEBUG << "body: " << *_bodyPtr;
             _jsonPtr.reset();
         }
     }
@@ -375,11 +418,15 @@ class HttpResponseImpl : public HttpResponse
     {
         auto gunzipBody = utils::gzipDecompress(_bodyPtr);
         if (gunzipBody)
+        {
+            removeHeader("content-encoding");
             _bodyPtr = gunzipBody;
+        }
     }
 
   protected:
-    void makeHeaderString(const std::shared_ptr<std::string> &headerStringPtr) const;
+    void makeHeaderString(
+        const std::shared_ptr<std::string> &headerStringPtr) const;
 
   private:
     std::unordered_map<std::string, std::string> _headers;
@@ -407,7 +454,8 @@ class HttpResponseImpl : public HttpResponse
     mutable int64_t _httpStringDate = -1;
 
     ContentType _contentType = CT_TEXT_HTML;
-    string_view _contentTypeString = "Content-Type: text/html; charset=utf-8\r\n";
+    string_view _contentTypeString =
+        "Content-Type: text/html; charset=utf-8\r\n";
     void setContentType(const string_view &contentType)
     {
         _contentTypeString = contentType;
@@ -418,4 +466,4 @@ class HttpResponseImpl : public HttpResponse
     }
 };
 typedef std::shared_ptr<HttpResponseImpl> HttpResponseImplPtr;
-} // namespace drogon
+}  // namespace drogon

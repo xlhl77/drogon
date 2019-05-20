@@ -14,12 +14,12 @@
 #pragma once
 
 #include "../ResultImpl.h"
-#include <trantor/utils/Logger.h>
-#include <mysql.h>
-#include <memory>
-#include <string>
-#include <unordered_map>
 #include <algorithm>
+#include <memory>
+#include <mysql.h>
+#include <string>
+#include <trantor/utils/Logger.h>
+#include <unordered_map>
 #include <vector>
 #include <cstring>
 #include <drogon/utils/json.hpp>
@@ -28,7 +28,6 @@ namespace drogon
 {
 namespace orm
 {
-
 class MysqlResultImpl : public ResultImpl
 {
   public:
@@ -53,7 +52,10 @@ class MysqlResultImpl : public ResultImpl
             for (row_size_type i = 0; i < _fieldNum; i++)
             {
                 std::string fieldName = _fieldArray[i].name;
-                std::transform(fieldName.begin(), fieldName.end(), fieldName.begin(), tolower);
+                std::transform(fieldName.begin(),
+                               fieldName.end(),
+                               fieldName.begin(),
+                               tolower);
                 (*_fieldMapPtr)[fieldName] = i;
                 // _offset.push_back({_fieldArray[i].length, len});
                 // len += _fieldArray[i].length;
@@ -65,7 +67,22 @@ class MysqlResultImpl : public ResultImpl
                 _binds.get()[i].is_null = (my_bool *)(&_isNULL[i]);
                 _binds.get()[i].length = &_len[i];
             }
-
+        }
+        if (size() > 0)
+        {
+            _rowsPtr = std::make_shared<
+                std::vector<std::pair<char **, std::vector<unsigned long>>>>();
+            MYSQL_ROW row;
+            std::vector<unsigned long> vLens;
+            vLens.resize(_fieldNum);
+            while ((row = mysql_fetch_row(r.get())) != NULL)
+            {
+                auto lengths = mysql_fetch_lengths(r.get());
+                memcpy(vLens.data(),
+                       lengths,
+                       sizeof(unsigned long) * _fieldNum);
+                _rowsPtr->push_back(std::make_pair(row, vLens));
+            }
         }
     }
     virtual size_type size() const noexcept override;
@@ -73,9 +90,11 @@ class MysqlResultImpl : public ResultImpl
     virtual const char *columnName(row_size_type number) const override;
     virtual size_type affectedRows() const noexcept override;
     virtual row_size_type columnNumber(const char colName[]) const override;
-    virtual const char *getValue(size_type row, row_size_type column) const override;
+    virtual const char *getValue(size_type row,
+                                 row_size_type column) const override;
     virtual bool isNull(size_type row, row_size_type column) const override;
-    virtual field_size_type getLength(size_type row, row_size_type column) const override;
+    virtual field_size_type getLength(size_type row,
+                                      row_size_type column) const override;
     virtual unsigned long long insertId() const noexcept override;
     virtual bool toJson(json &result) noexcept override;
 
@@ -96,5 +115,5 @@ class MysqlResultImpl : public ResultImpl
     std::vector<my_bool> _isNULL;
 };
 
-} // namespace orm
-} // namespace drogon
+}  // namespace orm
+}  // namespace drogon
