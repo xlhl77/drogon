@@ -68,22 +68,6 @@ class MysqlResultImpl : public ResultImpl
                 _binds.get()[i].length = &_len[i];
             }
         }
-        if (size() > 0)
-        {
-            _rowsPtr = std::make_shared<
-                std::vector<std::pair<char **, std::vector<unsigned long>>>>();
-            MYSQL_ROW row;
-            std::vector<unsigned long> vLens;
-            vLens.resize(_fieldNum);
-            while ((row = mysql_fetch_row(r.get())) != NULL)
-            {
-                auto lengths = mysql_fetch_lengths(r.get());
-                memcpy(vLens.data(),
-                       lengths,
-                       sizeof(unsigned long) * _fieldNum);
-                _rowsPtr->push_back(std::make_pair(row, vLens));
-            }
-        }
     }
     virtual size_type size() const noexcept override;
     virtual row_size_type columns() const noexcept override;

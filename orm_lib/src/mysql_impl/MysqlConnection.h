@@ -15,6 +15,7 @@
 #pragma once
 
 #include "../DbConnection.h"
+#include "MysqlResultImpl.h"
 #include <drogon/orm/DbClient.h>
 #include <functional>
 #include <iostream>
