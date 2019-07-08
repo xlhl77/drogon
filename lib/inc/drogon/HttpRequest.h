@@ -92,19 +92,23 @@ class HttpRequest
      * '?' in the URL string. If the http method is POST, the query string is
      * the content(body) string of the HTTP request.
      */
-    virtual const std::string &query() const = 0;
-    const std::string &getQuery() const
+    virtual string_view query() const = 0;
+    string_view getQuery() const
     {
         return query();
     }
 
     /// Get the content string of the request, which is the body part of the
     /// request.
-    virtual const std::string &body() const = 0;
-    const std::string &getBody() const
+    virtual string_view body() const = 0;
+    string_view getBody() const
     {
         return body();
     }
+
+    /// Set the content string of the request.
+    virtual void setBody(const std::string &body) = 0;
+    virtual void setBody(std::string &&body) = 0;
 
     /// Get the path of the request.
     virtual const std::string &path() const = 0;
@@ -174,8 +178,9 @@ class HttpRequest
 
     /// Get the Json object of the request
     /**
-     * The content type of the request must be 'application/json', otherwise
-     * the method returns an empty object.
+     * The content type of the request must be 'application/json', and the query
+     * string (the part after the question mark in the URI) must be empty,
+     * otherwise the method returns an empty shared_ptr object.
      */
     virtual const std::shared_ptr<Json::Value> jsonObject() const = 0;
     const std::shared_ptr<Json::Value> getJsonObject() const
@@ -202,6 +207,10 @@ class HttpRequest
 
     /// Set or get the content type
     virtual void setContentTypeCode(const ContentType type) = 0;
+
+    /// Add a cookie
+    virtual void addCookie(const std::string &key,
+                           const std::string &value) = 0;
 
     /// The following methods are a series of factory methods that help users
     /// create request objects.

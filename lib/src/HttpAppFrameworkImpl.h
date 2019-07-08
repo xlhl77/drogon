@@ -41,7 +41,7 @@ namespace drogon
 {
 struct InitBeforeMainFunction
 {
-    InitBeforeMainFunction(const std::function<void()> &func)
+    explicit InitBeforeMainFunction(const std::function<void()> &func)
     {
         func();
     }
@@ -152,7 +152,7 @@ class HttpAppFrameworkImpl : public HttpAppFramework
                                  AdviceCallback &&,
                                  AdviceChainCallback &&)> &advice) override
     {
-        _postRoutingAdvices.emplace_front(advice);
+        _postRoutingAdvices.emplace_back(advice);
     }
     virtual void registerPreHandlingAdvice(
         const std::function<void(const HttpRequestPtr &,
@@ -170,7 +170,7 @@ class HttpAppFrameworkImpl : public HttpAppFramework
     virtual void registerPostRoutingAdvice(
         const std::function<void(const HttpRequestPtr &)> &advice) override
     {
-        _postRoutingObservers.emplace_front(advice);
+        _postRoutingObservers.emplace_back(advice);
     }
     virtual void registerPreHandlingAdvice(
         const std::function<void(const HttpRequestPtr &)> &advice) override
@@ -181,7 +181,7 @@ class HttpAppFrameworkImpl : public HttpAppFramework
         const std::function<void(const HttpRequestPtr &,
                                  const HttpResponsePtr &)> &advice) override
     {
-        _postHandlingAdvices.emplace_front(advice);
+        _postHandlingAdvices.emplace_back(advice);
     }
 
     virtual void enableSession(const size_t timeout = 0) override
@@ -264,6 +264,10 @@ class HttpAppFrameworkImpl : public HttpAppFramework
     {
         _clientMaxBodySize = maxSize;
     }
+    virtual void setClientMaxMemoryBodySize(size_t maxSize) override
+    {
+        _clientMaxMemoryBodySize = maxSize;
+    }
     virtual void setClientMaxWebSocketMessageSize(size_t maxSize) override
     {
         _clientMaxWebSocketMessageSize = maxSize;
@@ -279,6 +283,10 @@ class HttpAppFrameworkImpl : public HttpAppFramework
     size_t getClientMaxBodySize() const
     {
         return _clientMaxBodySize;
+    }
+    size_t getClientMaxMemoryBodySize() const
+    {
+        return _clientMaxMemoryBodySize;
     }
     size_t getClientMaxWebSocketMessageSize() const
     {
@@ -423,6 +431,7 @@ class HttpAppFrameworkImpl : public HttpAppFramework
     bool _useSendfile = true;
     bool _useGzip = true;
     size_t _clientMaxBodySize = 1024 * 1024;
+    size_t _clientMaxMemoryBodySize = 64 * 1024;
     size_t _clientMaxWebSocketMessageSize = 128 * 1024;
     std::string _homePageFile = "index.html";
 
@@ -453,21 +462,21 @@ class HttpAppFrameworkImpl : public HttpAppFramework
                                    AdviceCallback &&,
                                    AdviceChainCallback &&)>>
         _preRoutingAdvices;
-    std::deque<std::function<void(const HttpRequestPtr &,
-                                  AdviceCallback &&,
-                                  AdviceChainCallback &&)>>
+    std::vector<std::function<void(const HttpRequestPtr &,
+                                   AdviceCallback &&,
+                                   AdviceChainCallback &&)>>
         _postRoutingAdvices;
     std::vector<std::function<void(const HttpRequestPtr &,
                                    AdviceCallback &&,
                                    AdviceChainCallback &&)>>
         _preHandlingAdvices;
-    std::deque<
+    std::vector<
         std::function<void(const HttpRequestPtr &, const HttpResponsePtr &)>>
         _postHandlingAdvices;
 
     std::vector<std::function<void(const HttpRequestPtr &)>>
         _preRoutingObservers;
-    std::deque<std::function<void(const HttpRequestPtr &)>>
+    std::vector<std::function<void(const HttpRequestPtr &)>>
         _postRoutingObservers;
     std::vector<std::function<void(const HttpRequestPtr &)>>
         _preHandlingObservers;

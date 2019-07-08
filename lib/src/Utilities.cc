@@ -462,6 +462,12 @@ std::string urlDecode(const std::string &szToDecode)
                      szToDecode.c_str() + szToDecode.length());
 }
 
+std::string urlDecode(const string_view &szToDecode)
+{
+    return urlDecode(szToDecode.data(),
+                     szToDecode.data() + szToDecode.length());
+}
+
 std::string urlDecode(const char *begin, const char *end)
 {
     std::string result;
@@ -506,13 +512,10 @@ std::string urlDecode(const char *begin, const char *end)
                         x2 = x2 - 'A' + 10;
                     }
                     hex = x1 * 16 + x2;
-                    //字母和数字[0-9a-zA-Z]、一些特殊符号[$-_.+!*'(),]
-                    //、以及某些保留字[$&+,/:;=?@]
-                    //可以不经过编码直接用于URL
                     if (!((hex >= 48 && hex <= 57) ||   // 0-9
                           (hex >= 97 && hex <= 122) ||  // a-z
                           (hex >= 65 && hex <= 90) ||   // A-Z
-                          //一些特殊符号及保留字[$-_.+!*'(),]  [$&+,/:;?@]
+                          //[$-_.+!*'(),]  [$&+,/:;?@]
                           hex == 0x21 || hex == 0x24 || hex == 0x26 ||
                           hex == 0x27 || hex == 0x28 || hex == 0x29 ||
                           hex == 0x2a || hex == 0x2b || hex == 0x2c ||
@@ -594,7 +597,6 @@ std::shared_ptr<std::string> gzipDecompress(
         {
             decompressed->resize(decompressed->length() * 2);
         }
-        // chadeltu 加了(Bytef *)
         strm.next_out = (Bytef *)decompressed->data() + strm.total_out;
         strm.avail_out = decompressed->length() - strm.total_out;
         // Inflate another chunk.
@@ -646,8 +648,7 @@ trantor::Date getHttpDate(const std::string &httpFullDateString)
 }
 std::string formattedString(const char *format, ...)
 {
-    std::string strBuffer;
-    strBuffer.resize(1024);
+    std::string strBuffer(128, 0);
     va_list ap, backup_ap;
     va_start(ap, format);
     va_copy(backup_ap, ap);

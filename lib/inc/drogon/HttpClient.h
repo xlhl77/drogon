@@ -6,7 +6,7 @@
  *
  *  Copyright 2018, An Tao.  All rights reserved.
  *  https://github.com/an-tao/drogon
- *  Use of this source code is governed by a MIT license
+ *  Use of this source code is governed by the MIT license
  *  that can be found in the License file.
  *
  *  Drogon
@@ -49,6 +49,10 @@ class HttpClient : public trantor::NonCopyable
     /**
      * The response from the http server is obtained
      * in the callback function.
+     * Note:
+     * The request object is altered(some headers are added to it) before it is
+     * sent, so calling this method with a same request object in different
+     * thread is dangerous.
      */
     virtual void sendRequest(const HttpRequestPtr &req,
                              const HttpReqCallback &callback) = 0;
@@ -63,6 +67,24 @@ class HttpClient : public trantor::NonCopyable
      * rfc2616-8.1.2.2
      */
     virtual void setPipeliningDepth(size_t depth) = 0;
+
+    /// Enable cookies for the client
+    /**
+     * If the @param flag is true, all requests sent by the client carry the
+     * cookies set by the server side. Cookies are disabled by default.
+     */
+    virtual void enableCookies(bool flag = true) = 0;
+
+    /// Add a cookie to the client
+    /**
+     * NOTE:
+     * These methods are independent of the enableCookies() method. Whether the
+     * enableCookies() is called with true or false, the cookies added by these
+     * methods will be sent to the server.
+     */
+    virtual void addCookie(const std::string &key,
+                           const std::string &value) = 0;
+    virtual void addCookie(const Cookie &cookie) = 0;
 
     /// Use ip and port to connect to server
     /**
@@ -81,6 +103,10 @@ class HttpClient : public trantor::NonCopyable
 
     /// Get the event loop of the client;
     virtual trantor::EventLoop *getLoop() = 0;
+
+    /// Get the number of bytes sent or received
+    virtual size_t bytesSent() const = 0;
+    virtual size_t bytesReceived() const = 0;
 
     /// Use hostString to connect to server
     /**

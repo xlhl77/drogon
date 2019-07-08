@@ -206,6 +206,10 @@ int main()
                                        drogon::AdviceChainCallback &&accb) {
         LOG_DEBUG << "postRouting1";
         LOG_DEBUG << "Matched path=" << req->matchedPathPattern();
+        for (auto &cookie : req->cookies())
+        {
+            LOG_DEBUG << "cookie: " << cookie.first << "=" << cookie.second;
+        }
         accb();
     });
     app().registerPreHandlingAdvice([](const drogon::HttpRequestPtr &req,
@@ -217,10 +221,11 @@ int main()
         // return;
         accb();
     });
-    app().registerPostHandlingAdvice(
-        [](const drogon::HttpRequestPtr &, const drogon::HttpResponsePtr &) {
-            LOG_DEBUG << "postHandling1";
-        });
+    app().registerPostHandlingAdvice([](const drogon::HttpRequestPtr &,
+                                        const drogon::HttpResponsePtr &resp) {
+        LOG_DEBUG << "postHandling1";
+        resp->addHeader("Access-Control-Allow-Origin", "*");
+    });
     app().registerPreRoutingAdvice([](const drogon::HttpRequestPtr &req) {
         LOG_DEBUG << "preRouting observer";
     });

@@ -62,7 +62,7 @@ void WebSocketConnectionImpl::send(const char *msg,
 }
 
 void WebSocketConnectionImpl::sendWsData(const char *msg,
-                                         size_t len,
+                                         uint64_t len,
                                          unsigned char opcode)
 {
     LOG_TRACE << "send " << len << " bytes";
@@ -320,4 +320,48 @@ bool WebSocketMessageParser::parse(trantor::MsgBuffer *buffer)
         }
     }
     return true;
+}
+
+void WebSocketConnectionImpl::onNewMessage(
+    const trantor::TcpConnectionPtr &connPtr,
+    trantor::MsgBuffer *buffer)
+{
+    while (buffer->readableBytes() > 0)
+    {
+        auto success = _parser.parse(buffer);
+        if (success)
+        {
+            std::string message;
+            WebSocketMessageType type;
+            if (_parser.gotAll(message, type))
+            {
+                if (type == WebSocketMessageType::Ping)
+                {
+                    // ping
+                    send(message, WebSocketMessageType::Pong);
+                }
+                else if (type == WebSocketMessageType::Close)
+                {
+                    // close
+                    connPtr->shutdown();
+                }
+                else if (type == WebSocketMessageType::Unknown)
+                {
+                    return;
+                }
+                _messageCallback(std::move(message), shared_from_this(), type);
+            }
+            else
+            {
+                return;
+            }
+        }
+        else
+        {
+            // Websock error!
+            connPtr->shutdown();
+            return;
+        }
+    }
+    return;
 }

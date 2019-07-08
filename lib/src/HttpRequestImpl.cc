@@ -14,6 +14,8 @@
 
 #include "HttpRequestImpl.h"
 #include "HttpFileUploadRequest.h"
+#include "HttpAppFrameworkImpl.h"
+
 #include <drogon/utils/Utilities.h>
 #include <fstream>
 #include <iostream>
@@ -23,35 +25,35 @@ using namespace drogon;
 
 void HttpRequestImpl::parseParameters() const
 {
-    const std::string &input = query();
+    auto input = query();
     if (input.empty())
         return;
     std::string type = getHeaderBy("content-type");
     std::transform(type.begin(), type.end(), type.begin(), tolower);
     if (_method == Get ||
         (_method == Post &&
-         (type == "" ||
+         (type.empty() ||
           type.find("application/x-www-form-urlencoded") != std::string::npos)))
     {
-        std::string::size_type pos = 0;
+        string_view::size_type pos = 0;
         while ((input[pos] == '?' || isspace(input[pos])) &&
                pos < input.length())
         {
             pos++;
         }
-        std::string value = input.substr(pos);
-        while ((pos = value.find("&")) != std::string::npos)
+        auto value = input.substr(pos);
+        while ((pos = value.find("&")) != string_view::npos)
         {
-            std::string coo = value.substr(0, pos);
+            auto coo = value.substr(0, pos);
             auto epos = coo.find("=");
-            if (epos != std::string::npos)
+            if (epos != string_view::npos)
             {
-                std::string key = coo.substr(0, epos);
-                std::string::size_type cpos = 0;
+                auto key = coo.substr(0, epos);
+                string_view::size_type cpos = 0;
                 while (cpos < key.length() && isspace(key[cpos]))
                     cpos++;
                 key = key.substr(cpos);
-                std::string pvalue = coo.substr(epos + 1);
+                auto pvalue = coo.substr(epos + 1);
                 std::string pdecode = utils::urlDecode(pvalue);
                 std::string keydecode = utils::urlDecode(key);
                 _parameters[keydecode] = pdecode;
@@ -60,16 +62,16 @@ void HttpRequestImpl::parseParameters() const
         }
         if (value.length() > 0)
         {
-            std::string &coo = value;
+            auto &coo = value;
             auto epos = coo.find("=");
-            if (epos != std::string::npos)
+            if (epos != string_view::npos)
             {
-                std::string key = coo.substr(0, epos);
-                std::string::size_type cpos = 0;
+                auto key = coo.substr(0, epos);
+                string_view::size_type cpos = 0;
                 while (cpos < key.length() && isspace(key[cpos]))
                     cpos++;
                 key = key.substr(cpos);
-                std::string pvalue = coo.substr(epos + 1);
+                auto pvalue = coo.substr(epos + 1);
                 std::string pdecode = utils::urlDecode(pvalue);
                 std::string keydecode = utils::urlDecode(key);
                 _parameters[keydecode] = pdecode;
@@ -372,13 +374,16 @@ HttpRequestPtr HttpRequest::newHttpFormPostRequest()
 
 HttpRequestPtr HttpRequest::newHttpJsonRequest(const Json::Value &data)
 {
+    static std::once_flag once;
+    static Json::StreamWriterBuilder builder;
+    std::call_once(once, []() {
+        builder["commentStyle"] = "None";
+        builder["indentation"] = "";
+    });
     auto req = std::make_shared<HttpRequestImpl>(nullptr);
     req->setMethod(drogon::Get);
     req->setVersion(drogon::HttpRequest::kHttp11);
     req->_contentType = CT_APPLICATION_JSON;
-    Json::StreamWriterBuilder builder;
-    builder["commentStyle"] = "None";
-    builder["indentation"] = "";
     req->setContent(writeString(builder, data));
     return req;
 }
@@ -387,4 +392,148 @@ HttpRequestPtr HttpRequest::newFileUploadRequest(
     const std::vector<UploadFile> &files)
 {
     return std::make_shared<HttpFileUploadRequest>(files);
+}
+
+void HttpRequestImpl::swap(HttpRequestImpl &that)
+{
+    std::swap(_method, that._method);
+    std::swap(_version, that._version);
+    _path.swap(that._path);
+    _query.swap(that._query);
+
+    _headers.swap(that._headers);
+    _cookies.swap(that._cookies);
+    _parameters.swap(that._parameters);
+    _jsonPtr.swap(that._jsonPtr);
+    _sessionPtr.swap(that._sessionPtr);
+
+    std::swap(_peer, that._peer);
+    std::swap(_local, that._local);
+    _date.swap(that._date);
+    _content.swap(that._content);
+    std::swap(_contentLen, that._contentLen);
+}
+
+const char *HttpRequestImpl::methodString() const
+{
+    const char *result = "UNKNOWN";
+    switch (_method)
+    {
+        case Get:
+            result = "GET";
+            break;
+        case Post:
+            result = "POST";
+            break;
+        case Head:
+            result = "HEAD";
+            break;
+        case Put:
+            result = "PUT";
+            break;
+        case Delete:
+            result = "DELETE";
+            break;
+        case Options:
+            result = "OPTIONS";
+            break;
+        default:
+            break;
+    }
+    return result;
+}
+
+bool HttpRequestImpl::setMethod(const char *start, const char *end)
+{
+    assert(_method == Invalid);
+    string_view m(start, end - start);
+    switch (m.length())
+    {
+        case 3:
+            if (m == "GET")
+            {
+                _method = Get;
+            }
+            else if (m == "PUT")
+            {
+                _method = Put;
+            }
+            else
+            {
+                _method = Invalid;
+            }
+            break;
+        case 4:
+            if (m == "POST")
+            {
+                _method = Post;
+            }
+            else if (m == "HEAD")
+            {
+                _method = Head;
+            }
+            else
+            {
+                _method = Invalid;
+            }
+            break;
+        case 6:
+            if (m == "DELETE")
+            {
+                _method = Delete;
+            }
+            else
+            {
+                _method = Invalid;
+            }
+            break;
+        case 7:
+            if (m == "OPTIONS")
+            {
+                _method = Options;
+            }
+            else
+            {
+                _method = Invalid;
+            }
+            break;
+        default:
+            _method = Invalid;
+            break;
+    }
+
+    // if (_method != Invalid)
+    // {
+    //     _content = "";
+    //     _query = "";
+    //     _cookies.clear();
+    //     _parameters.clear();
+    //     _headers.clear();
+    // }
+    return _method != Invalid;
+}
+
+HttpRequestImpl::~HttpRequestImpl()
+{
+}
+
+void HttpRequestImpl::reserveBodySize()
+{
+    if (_contentLen <=
+        HttpAppFrameworkImpl::instance().getClientMaxMemoryBodySize())
+    {
+        _content.reserve(_contentLen);
+    }
+    else
+    {
+        // Store data of body to a temperary file
+        auto tmpfile = HttpAppFrameworkImpl::instance().getUploadPath();
+        auto fileName = utils::getUuid();
+        tmpfile.append("/tmp/")
+            .append(1, fileName[0])
+            .append(1, fileName[1])
+            .append("/")
+            .append(fileName);
+        _cacheFilePtr = std::make_unique<CacheFile>(tmpfile);
+    }
 }

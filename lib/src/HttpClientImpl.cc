@@ -157,6 +157,16 @@ void HttpClientImpl::sendRequestInLoop(const drogon::HttpRequestPtr &req,
     }
     req->addHeader("User-Agent", "DrogonClient");
 
+    for (auto &cookie : _validCookies)
+    {
+        if ((cookie.expiresDate().microSecondsSinceEpoch() == 0 ||
+             cookie.expiresDate() > trantor::Date::now()) &&
+            (cookie.path().empty() || req->path().find(cookie.path()) == 0))
+        {
+            req->addCookie(cookie.key(), cookie.value());
+        }
+    }
+
     if (!_tcpClient)
     {
         bool hasIpv6Address = false;
@@ -180,8 +190,7 @@ void HttpClientImpl::sendRequestInLoop(const drogon::HttpRequestPtr &req,
             // TODO: timeout should be set by user
             if (InetAddress::resolve(_domain, &_server) == false)
             {
-                callback(ReqResult::BadServerAddress,
-                         HttpResponse::newHttpResponse());
+                callback(ReqResult::BadServerAddress, nullptr);
                 return;
             }
             LOG_TRACE << "dns:domain=" << _domain << ";ip=" << _server.toIp();
@@ -258,8 +267,7 @@ void HttpClientImpl::sendRequestInLoop(const drogon::HttpRequestPtr &req,
         }
         else
         {
-            callback(ReqResult::BadServerAddress,
-                     HttpResponse::newHttpResponse());
+            callback(ReqResult::BadServerAddress, nullptr);
             return;
         }
     }
@@ -311,6 +319,7 @@ void HttpClientImpl::sendReq(const trantor::TcpConnectionPtr &connPtr,
     implPtr->appendToBuffer(&buffer);
     LOG_TRACE << "Send request:"
               << std::string(buffer.peek(), buffer.readableBytes());
+    _bytesSent += buffer.readableBytes();
     connPtr->send(std::move(buffer));
 }
 
@@ -321,12 +330,14 @@ void HttpClientImpl::onRecvMessage(const trantor::TcpConnectionPtr &connPtr,
         any_cast<HttpResponseParser>(connPtr->getMutableContext());
 
     // LOG_TRACE << "###:" << msg->readableBytes();
+    auto msgSize = msg->readableBytes();
     while (msg->readableBytes() > 0)
     {
         if (!responseParser->parseResponse(msg))
         {
             assert(!_pipeliningCallbacks.empty());
             onError(ReqResult::BadResponse);
+            _bytesReceived += (msgSize - msg->readableBytes());
             return;
         }
         if (responseParser->gotAll())
@@ -345,6 +356,9 @@ void HttpClientImpl::onRecvMessage(const trantor::TcpConnectionPtr &connPtr,
             }
             auto cb = std::move(_pipeliningCallbacks.front());
             _pipeliningCallbacks.pop();
+            handleCookies(resp);
+            _bytesReceived += (msgSize - msg->readableBytes());
+            msgSize = msg->readableBytes();
             cb(ReqResult::Ok, resp);
 
             // LOG_TRACE << "pipelining buffer size=" <<
@@ -399,13 +413,39 @@ void HttpClientImpl::onError(ReqResult result)
     {
         auto cb = std::move(_pipeliningCallbacks.front());
         _pipeliningCallbacks.pop();
-        cb(result, HttpResponse::newHttpResponse());
+        cb(result, nullptr);
     }
     while (!_requestsBuffer.empty())
     {
         auto cb = std::move(_requestsBuffer.front().second);
         _requestsBuffer.pop();
-        cb(result, HttpResponse::newHttpResponse());
+        cb(result, nullptr);
     }
     _tcpClient.reset();
+}
+
+void HttpClientImpl::handleCookies(const HttpResponseImplPtr &resp)
+{
+    _loop->assertInLoopThread();
+    if (!_enableCookies)
+        return;
+    for (auto &iter : resp->getCookies())
+    {
+        auto &cookie = iter.second;
+        if (!cookie.domain().empty() && cookie.domain() != _domain)
+        {
+            continue;
+        }
+        if (cookie.isSecure())
+        {
+            if (_useSSL)
+            {
+                _validCookies.emplace_back(cookie);
+            }
+        }
+        else
+        {
+            _validCookies.emplace_back(cookie);
+        }
+    }
 }

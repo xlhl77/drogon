@@ -20,8 +20,6 @@
 
 using namespace drogon;
 
-namespace drogon
-{
 void HttpControllersRouter::doWhenNoHandlerFound(
     const HttpRequestImplPtr &req,
     std::function<void(const HttpResponsePtr &)> &&callback,
@@ -31,22 +29,15 @@ void HttpControllersRouter::doWhenNoHandlerFound(
     if (req->path() == "/" &&
         !HttpAppFrameworkImpl::instance().getHomePage().empty())
     {
-        // auto resp = drogon::HttpResponse::newRedirectionResponse("/" +
-        // HttpAppFrameworkImpl::instance().getHomePage());
-        // callback(resp);
-        // Redirect on the server side
         req->setPath("/" + HttpAppFrameworkImpl::instance().getHomePage());
         drogon::app().forward(req, std::move(callback));
         return;
     }
-    // auto resp = drogon::HttpResponse::newNotFoundResponse();
-    // callback(resp);
     _fileRouter.route(req,
                       std::move(callback),
                       needSetJsessionid,
                       std::move(sessionId));
 }
-}  // namespace drogon
 
 void HttpControllersRouter::init(
     const std::vector<trantor::EventLoop *> &ioLoops)
@@ -65,7 +56,7 @@ void HttpControllersRouter::init(
             if (binder)
             {
                 binder->_filters =
-                    FiltersFunction::createFilters(binder->_filterNames);
+                    filters_function::createFilters(binder->_filterNames);
                 for (auto ioloop : ioLoops)
                 {
                     binder->_responsePtrMap[ioloop] =
@@ -275,7 +266,7 @@ void HttpControllersRouter::route(
                             auto callbackPtr = std::make_shared<
                                 std::function<void(const HttpResponsePtr &)>>(
                                 std::move(callback));
-                            FiltersFunction::doFilters(
+                            filters_function::doFilters(
                                 filters,
                                 req,
                                 callbackPtr,
@@ -324,7 +315,7 @@ void HttpControllersRouter::route(
                                     auto sessionIdPtr =
                                         std::make_shared<std::string>(
                                             std::move(sessionId));
-                                    FiltersFunction::doFilters(
+                                    filters_function::doFilters(
                                         filters,
                                         req,
                                         callbackPtr,
@@ -514,6 +505,18 @@ void HttpControllersRouter::doPreHandlingAdvices(
         }
         methods.resize(methods.length() - 1);
         resp->addHeader("ALLOW", methods);
+        auto &origin = req->getHeader("Origin");
+        if (origin.empty())
+        {
+            resp->addHeader("Access-Control-Allow-Origin", "*");
+        }
+        else
+        {
+            resp->addHeader("Access-Control-Allow-Origin", origin);
+        }
+        resp->addHeader("Access-Control-Allow-Methods", methods);
+        resp->addHeader("Access-Control-Allow-Headers",
+                        "x-requested-with,content-type");
         callback(resp);
         return;
     }
@@ -570,4 +573,16 @@ void HttpControllersRouter::doPreHandlingAdvices(
                                     std::move(*sessionIdPtr));
             });
     }
+}
+
+void HttpControllersRouter::invokeCallback(
+    const std::function<void(const HttpResponsePtr &)> &callback,
+    const HttpRequestImplPtr &req,
+    const HttpResponsePtr &resp)
+{
+    for (auto &advice : _postHandlingAdvices)
+    {
+        advice(req, resp);
+    }
+    callback(resp);
 }

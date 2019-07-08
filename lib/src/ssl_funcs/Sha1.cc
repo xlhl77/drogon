@@ -15,13 +15,13 @@
 #include "Sha1.h"
 #include <string.h>
 
-static unsigned int FromBigEndian(unsigned int v)
+static inline unsigned int fromBigEndian(unsigned int v)
 {
     return ((v & 0xff) << 24) | ((v & 0xff00) << 8) | ((v & 0xff0000) >> 8) |
            ((v & 0xff000000) >> 24);
 }
 
-static void WriteBigEndian64(unsigned char *p, unsigned int v)
+static void writeBigEndian64(unsigned char *p, unsigned int v)
 {
     memset(p, 0, 8);
     memcpy(p, &v, 4);
@@ -34,22 +34,22 @@ static void WriteBigEndian64(unsigned char *p, unsigned int v)
     }
 }
 
-static unsigned int LeftRol(unsigned int v, int n)
+static inline unsigned int leftRoll(unsigned int v, int n)
 {
     return (v << n) | (v >> (32 - n));
 }
 
-unsigned char *SHA1(const unsigned char *data,
+unsigned char *SHA1(const unsigned char *dataIn,
                     size_t dataLen,
-                    unsigned char *md)
+                    unsigned char *dataOut)
 {
-    unsigned char *pbytes = (unsigned char *)data;
+    unsigned char *pbytes = (unsigned char *)dataIn;
     unsigned int nbyte = dataLen;
 
     static unsigned int words[80];
     unsigned int H[5] = {
         0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476, 0xC3D2E1F0};
-    unsigned int a, b, c, d, e, f, k, temp, bitlen[2], word;
+    unsigned int f, k, temp, bitlen[2], word;
     unsigned int i, j, index, p1, p2, maxlen;
     unsigned char spec[4] = {0};
     i = nbyte % 4;
@@ -71,10 +71,11 @@ unsigned char *SHA1(const unsigned char *data,
         maxlen = (nbyte + 1) - maxlen + 128;
     }
     p2 = maxlen - 8;
-    WriteBigEndian64((unsigned char *)bitlen, nbyte * 8);
+    writeBigEndian64((unsigned char *)bitlen, nbyte * 8);
 
     for (j = 0; j < maxlen; j += 64)
     {
+        unsigned int a, b, c, d, e;
         a = H[0];
         b = H[1];
         c = H[2];
@@ -101,13 +102,13 @@ unsigned char *SHA1(const unsigned char *data,
                 {
                     word = (index < maxlen - 4) ? bitlen[0] : bitlen[1];
                 }
-                words[i] = FromBigEndian(word);
+                words[i] = fromBigEndian(word);
             }
             else
             {
-                words[i] = LeftRol(words[i - 3] ^ words[i - 8] ^ words[i - 14] ^
-                                       words[i - 16],
-                                   1);
+                words[i] = leftRoll(words[i - 3] ^ words[i - 8] ^
+                                        words[i - 14] ^ words[i - 16],
+                                    1);
             }
             if (i < 20)
             {
@@ -129,10 +130,10 @@ unsigned char *SHA1(const unsigned char *data,
                 f = b ^ c ^ d;
                 k = 0xCA62C1D6;
             }
-            temp = LeftRol(a, 5) + f + e + k + words[i];
+            temp = leftRoll(a, 5) + f + e + k + words[i];
             e = d;
             d = c;
-            c = LeftRol(b, 30);
+            c = leftRoll(b, 30);
             b = a;
             a = temp;
         }
@@ -149,10 +150,10 @@ unsigned char *SHA1(const unsigned char *data,
         memcpy(buf, &(H[i]), 4);
         for (int r = 3; r >= 0; r--)
         {
-            md[ct] = buf[r];
+            dataOut[ct] = buf[r];
             ct++;
         }
     }
 
-    return md;
+    return dataOut;
 }

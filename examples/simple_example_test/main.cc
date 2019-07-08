@@ -31,6 +31,8 @@
 
 using namespace drogon;
 
+Cookie sessionID;
+
 void outputGood(const HttpRequestPtr &req, bool isHttps)
 {
     static int i = 0;
@@ -55,8 +57,86 @@ void doTest(const HttpClientPtr &client,
             std::promise<int> &pro,
             bool isHttps = false)
 {
-    /// Test gzip
+    /// Get cookie
+    if (!sessionID)
+    {
+        auto req = HttpRequest::newHttpRequest();
+        req->setMethod(drogon::Get);
+        req->setPath("/");
+        std::promise<int> waitCookie;
+        auto f = waitCookie.get_future();
+        client->sendRequest(req,
+                            [=, &waitCookie](ReqResult result,
+                                             const HttpResponsePtr &resp) {
+                                if (result == ReqResult::Ok)
+                                {
+                                    auto &id = resp->getCookie("JSESSIONID");
+                                    if (!id)
+                                    {
+                                        LOG_ERROR << "Error!";
+                                        exit(1);
+                                    }
+                                    sessionID = id;
+                                    client->addCookie(id);
+                                    waitCookie.set_value(1);
+                                }
+                                else
+                                {
+                                    LOG_ERROR << "Error!";
+                                    exit(1);
+                                }
+                            });
+        f.get();
+    }
+    /// Test session
     auto req = HttpRequest::newHttpRequest();
+    req->setMethod(drogon::Get);
+    req->setPath("/slow");
+    client->sendRequest(
+        req, [=](ReqResult result, const HttpResponsePtr &resp) {
+            if (result == ReqResult::Ok)
+            {
+                outputGood(req, isHttps);
+                auto req1 = HttpRequest::newHttpRequest();
+                req1->setMethod(drogon::Get);
+                req1->setPath("/slow");
+                client->sendRequest(
+                    req1,
+                    [req1, isHttps](ReqResult result,
+                                    const HttpResponsePtr &resp1) {
+                        if (result == ReqResult::Ok)
+                        {
+                            auto &json = resp1->jsonObject();
+                            if (json && json->get("message", std::string(""))
+                                                .asString() ==
+                                            "Visit interval should be "
+                                            "at least 10 "
+                                            "seconds")
+                            {
+                                outputGood(req1, isHttps);
+                            }
+                            else
+                            {
+                                LOG_DEBUG << resp1->body();
+                                LOG_ERROR << "Error!";
+                                exit(1);
+                            }
+                        }
+                        else
+                        {
+                            LOG_ERROR << "Error!";
+                            exit(1);
+                        }
+                    });
+            }
+            else
+            {
+                LOG_ERROR << "Error!";
+                exit(1);
+            }
+        });
+    /// Test gzip
+    req = HttpRequest::newHttpRequest();
     req->setMethod(drogon::Get);
     req->addHeader("accept-encoding", "gzip");
     req->setPath("/api/v1/apitest/get/111");
@@ -64,7 +144,7 @@ void doTest(const HttpClientPtr &client,
                         [=](ReqResult result, const HttpResponsePtr &resp) {
                             if (result == ReqResult::Ok)
                             {
-                                if (resp->getBody().length() == 5123)
+                                if (resp->getBody().length() == 4994)
                                 {
                                     outputGood(req, isHttps);
                                 }
@@ -113,32 +193,6 @@ void doTest(const HttpClientPtr &client,
     req = HttpRequest::newHttpRequest();
     req->setMethod(drogon::Get);
     req->setPath("/");
-    client->sendRequest(req,
-                        [=](ReqResult result, const HttpResponsePtr &resp) {
-                            if (result == ReqResult::Ok)
-                            {
-                                // LOG_DEBUG << resp->getBody();
-                                if (resp->getBody() == "<p>Hello, world!</p>")
-                                {
-                                    outputGood(req, isHttps);
-                                }
-                                else
-                                {
-                                    LOG_ERROR << "Error!";
-                                    exit(1);
-                                }
-                            }
-                            else
-                            {
-                                LOG_ERROR << "Error!";
-                                exit(1);
-                            }
-                        });
-    /// 2. Get /slow to test simple controller, session and filter (cookie is
-    /// not supported by HttpClient now)
-    req = HttpRequest::newHttpRequest();
-    req->setMethod(drogon::Get);
-    req->setPath("/slow");
     client->sendRequest(req,
                         [=](ReqResult result, const HttpResponsePtr &resp) {
                             if (result == ReqResult::Ok)
@@ -512,7 +566,7 @@ void doTest(const HttpClientPtr &client,
                         [=](ReqResult result, const HttpResponsePtr &resp) {
                             if (result == ReqResult::Ok)
                             {
-                                if (resp->getBody().length() == 5123)
+                                if (resp->getBody().length() == 4994)
                                 {
                                     outputGood(req, isHttps);
                                 }
@@ -533,7 +587,7 @@ void doTest(const HttpClientPtr &client,
     /// Test static function
     req = HttpRequest::newHttpRequest();
     req->setMethod(drogon::Get);
-    req->setPath("/api/v1/handle11/11/22/?p3=33");
+    req->setPath("/api/v1/handle11/11/2 2/?p3=3 x");
     req->setParameter("p4", "44");
     client->sendRequest(
         req, [=](ReqResult result, const HttpResponsePtr &resp) {
@@ -546,10 +600,10 @@ void doTest(const HttpClientPtr &client,
                         "<td>int p4</td>\n        <td>44</td>") !=
                         std::string::npos &&
                     resp->getBody().find(
-                        "<td>string p2</td>\n        <td>22</td>") !=
+                        "<td>string p2</td>\n        <td>2 2</td>") !=
                         std::string::npos &&
                     resp->getBody().find(
-                        "<td>string p3</td>\n        <td>33</td>") !=
+                        "<td>string p3</td>\n        <td>3 x</td>") !=
                         std::string::npos)
                 {
                     outputGood(req, isHttps);
@@ -741,8 +795,8 @@ void doTest(const HttpClientPtr &client,
             }
         });
 
-    /// Test file download, It is forbidden to download files from the parent
-    /// folder
+    /// Test file download, It is forbidden to download files from the
+    /// parent folder
     req = HttpRequest::newHttpRequest();
     req->setMethod(drogon::Get);
     req->setPath("/../../drogon.jpg");
@@ -923,8 +977,9 @@ void doTest(const HttpClientPtr &client,
     // return;
     // Test file upload
     UploadFile file1("./drogon.jpg");
-    UploadFile file2("./config.example.json", "config.json", "file2");
-    req = HttpRequest::newFileUploadRequest({file1, file2});
+    UploadFile file2("./drogon.jpg", "drogon1.jpg");
+    UploadFile file3("./config.example.json", "config.json", "file3");
+    req = HttpRequest::newFileUploadRequest({file1, file2, file3});
     req->setPath("/api/attachment/upload");
     req->setParameter("P1", "upload");
     req->setParameter("P2", "test");
@@ -956,7 +1011,6 @@ void doTest(const HttpClientPtr &client,
                             }
                         });
 }
-
 int main(int argc, char *argv[])
 {
     trantor::EventLoopThread loop[2];
@@ -973,6 +1027,9 @@ int main(int argc, char *argv[])
         auto client = HttpClient::newHttpClient("http://127.0.0.1:8848",
                                                 loop[0].getLoop());
         client->setPipeliningDepth(10);
+        if (sessionID)
+            client->addCookie(sessionID);
+
         doTest(client, pro1);
 #ifdef USE_OPENSSL
         std::promise<int> pro2;
@@ -980,6 +1037,8 @@ int main(int argc, char *argv[])
                                                    8849,
                                                    true,
                                                    loop[1].getLoop());
+        if (sessionID)
+            sslClient->addCookie(sessionID);
         doTest(sslClient, pro2, true);
         auto f2 = pro2.get_future();
         f2.get();
