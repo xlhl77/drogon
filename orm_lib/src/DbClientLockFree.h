@@ -15,14 +15,13 @@
 #pragma once
 
 #include "DbConnection.h"
-#include <drogon/HttpTypes.h>
 #include <drogon/orm/DbClient.h>
+#include <trantor/net/EventLoopThreadPool.h>
 #include <functional>
 #include <memory>
 #include <queue>
 #include <string>
 #include <thread>
-#include <trantor/net/EventLoopThreadPool.h>
 #include <unordered_set>
 
 namespace drogon
@@ -35,7 +34,8 @@ class DbClientLockFree : public DbClient,
   public:
     DbClientLockFree(const std::string &connInfo,
                      trantor::EventLoop *loop,
-                     ClientType type);
+                     ClientType type,
+                     size_t connectionNumberPerLoop);
     virtual ~DbClientLockFree() noexcept;
     virtual void execSql(std::string &&sql,
                          size_t paraNum,
@@ -55,37 +55,10 @@ class DbClientLockFree : public DbClient,
     std::string _connInfo;
     trantor::EventLoop *_loop;
     DbConnectionPtr newConnection();
-    const size_t _connectionNum = 4;
+    const size_t _connectionNum;
     std::vector<DbConnectionPtr> _connections;
     std::vector<DbConnectionPtr> _connectionHolders;
     std::unordered_set<DbConnectionPtr> _transSet;
-    struct SqlCmd
-    {
-        std::string _sql;
-        size_t _paraNum;
-        std::vector<const char *> _parameters;
-        std::vector<int> _length;
-        std::vector<int> _format;
-        QueryCallback _cb;
-        ExceptPtrCallback _exceptCb;
-        SqlCmd(std::string &&sql,
-               const size_t paraNum,
-               std::vector<const char *> &&parameters,
-               std::vector<int> &&length,
-               std::vector<int> &&format,
-               QueryCallback &&cb,
-               ExceptPtrCallback &&exceptCb)
-            : _sql(std::move(sql)),
-              _paraNum(paraNum),
-              _parameters(std::move(parameters)),
-              _length(std::move(length)),
-              _format(std::move(format)),
-              _cb(std::move(cb)),
-              _exceptCb(std::move(exceptCb))
-        {
-        }
-    };
-
     std::deque<std::shared_ptr<SqlCmd>> _sqlCmdBuffer;
 
     std::queue<std::function<void(const std::shared_ptr<Transaction> &)>>
@@ -96,6 +69,7 @@ class DbClientLockFree : public DbClient,
         std::function<void(const std::shared_ptr<Transaction> &)> &&callback);
 
     void handleNewTask(const DbConnectionPtr &conn);
+    size_t _connectionPos = 0;  // Used for pg batch mode.
 };
 
 }  // namespace orm

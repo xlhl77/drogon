@@ -1,9 +1,11 @@
-#include <iostream>
+
+#include "CustomCtrl.h"
+#include "CustomHeaderFilter.h"
+#include <drogon/config.h>
 #include <drogon/drogon.h>
 #include <vector>
 #include <string>
-#include "CustomCtrl.h"
-#include "CustomHeaderFilter.h"
+#include <iostream>
 
 using namespace drogon;
 using namespace std::chrono_literals;
@@ -117,32 +119,30 @@ class Test : public HttpController<Test>
 
 using namespace std::placeholders;
 using namespace drogon;
+
+/// Some examples in the main function some common functions of drogon. In
+/// practice, we don't need such a lengthy main function.
 int main()
 {
     std::cout << banner << std::endl;
-    // app().addListener("::1", 8848);
+    // app().addListener("::1", 8848); //ipv6
     app().addListener("0.0.0.0", 8848);
-#ifdef USE_OPENSSL
+#ifdef OpenSSL_FOUND
     // https
     drogon::app().setSSLFiles("server.pem", "server.pem");
-    // drogon::app().addListener("::1", 8849, true);
     drogon::app().addListener("0.0.0.0", 8849, true);
 #endif
-    // app().setThreadNum(4);
-    //    trantor::Logger::setLogLevel(trantor::Logger::TRACE);
-    // class function
+    // Class function example
     app().registerHandler("/api/v1/handle1/{1}/{2}/?p3={3}&p4={4}", &A::handle);
     app().registerHandler("/api/v1/handle11/{1}/{2}/?p3={3}&p4={4}",
                           &A::staticHandle);
-    // lambda example
+    // Lambda example
     app().registerHandler(
         "/api/v1/handle2/{1}/{2}",
         [](const HttpRequestPtr &req,
            std::function<void(const HttpResponsePtr &)> &&callback,
            int a,
            float b) {
-            // LOG_DEBUG << "int a=" << a;
-            // LOG_DEBUG << "float b=" << b;
             HttpViewData data;
             data.insert("title", std::string("ApiTest::get"));
             std::map<std::string, std::string> para;
@@ -153,10 +153,11 @@ int main()
             callback(res);
         });
 
+    // Functor example
     B b;
-    // functor example
     app().registerHandler("/api/v1/handle3/{1}/{2}", b);
 
+    // API example for std::function
     A tmp;
     std::function<void(const HttpRequestPtr &,
                        std::function<void(const HttpResponsePtr &)> &&,
@@ -165,28 +166,30 @@ int main()
                        const std::string &,
                        int)>
         func = std::bind(&A::handle, &tmp, _1, _2, _3, _4, _5, _6);
-    // api example for std::function
     app().registerHandler("/api/v1/handle4/{4}/{3}/{1}", func);
 
     app().setDocumentRoot("./");
     app().enableSession(60);
-    // start app framework
-    // drogon::app().enableDynamicViewsLoading({"/tmp/views"});
+
+    // Load configuration
     app().loadConfigFile("config.example.json");
     auto &json = app().getCustomConfig();
     if (json.empty())
     {
         std::cout << "empty custom config!" << std::endl;
     }
+
     // Install custom controller
     auto ctrlPtr = std::make_shared<CustomCtrl>("Hi");
     app().registerController(ctrlPtr);
+
     // Install custom filter
     auto filterPtr =
         std::make_shared<CustomHeaderFilter>("custom_header", "yes");
     app().registerFilter(filterPtr);
     app().setIdleConnectionTimeout(30s);
-    // Test AOP
+
+    // AOP example
     app().registerBeginningAdvice(
         []() { LOG_DEBUG << "Event loop is running!"; });
     app().registerNewConnectionAdvice([](const trantor::InetAddress &peer,
@@ -205,7 +208,7 @@ int main()
                                        drogon::AdviceCallback &&acb,
                                        drogon::AdviceChainCallback &&accb) {
         LOG_DEBUG << "postRouting1";
-        LOG_DEBUG << "Matched path=" << req->matchedPathPattern();
+        LOG_DEBUG << "Matched path=" << req->matchedPathPatternData();
         for (auto &cookie : req->cookies())
         {
             LOG_DEBUG << "cookie: " << cookie.first << "=" << cookie.second;
@@ -216,9 +219,6 @@ int main()
                                        drogon::AdviceCallback &&acb,
                                        drogon::AdviceChainCallback &&accb) {
         LOG_DEBUG << "preHandling1";
-        // auto resp = HttpResponse::newNotFoundResponse();
-        // acb(resp);
-        // return;
         accb();
     });
     app().registerPostHandlingAdvice([](const drogon::HttpRequestPtr &,
@@ -235,6 +235,8 @@ int main()
     app().registerPreHandlingAdvice([](const drogon::HttpRequestPtr &req) {
         LOG_DEBUG << "preHanding observer";
     });
+
+    // Output information of all handlers
     auto handlerInfo = app().getHandlersInfo();
     for (auto &info : handlerInfo)
     {
@@ -264,5 +266,6 @@ int main()
         }
         std::cout << std::get<2>(info) << std::endl;
     }
+
     app().run();
 }

@@ -14,28 +14,15 @@
 
 #pragma once
 
-#include "HttpClientImpl.h"
-#include "HttpControllersRouter.h"
-#include "HttpRequestImpl.h"
-#include "HttpResponseImpl.h"
-#include "HttpSimpleControllersRouter.h"
-#include "PluginsManager.h"
-#include "SharedLibManager.h"
-#include "WebSocketConnectionImpl.h"
-#include "WebsocketControllersRouter.h"
-#include "StaticFileRouter.h"
-
+#include "impl_forwards.h"
 #include <drogon/HttpAppFramework.h>
-#include <drogon/HttpSimpleController.h>
-#include <drogon/version.h>
-#include <trantor/net/EventLoop.h>
-#include <trantor/net/EventLoopThread.h>
-
+#include <drogon/config.h>
 #include <memory>
 #include <mutex>
 #include <regex>
 #include <string>
 #include <vector>
+#include <functional>
 
 namespace drogon
 {
@@ -49,34 +36,14 @@ struct InitBeforeMainFunction
 class HttpAppFrameworkImpl : public HttpAppFramework
 {
   public:
-    HttpAppFrameworkImpl()
-        : _httpCtrlsRouter(_staticFileRouter,
-                           _postRoutingAdvices,
-                           _postRoutingObservers,
-                           _preHandlingAdvices,
-                           _preHandlingObservers,
-                           _postHandlingAdvices),
-          _httpSimpleCtrlsRouter(_httpCtrlsRouter,
-                                 _postRoutingAdvices,
-                                 _postRoutingObservers,
-                                 _preHandlingAdvices,
-                                 _preHandlingObservers,
-                                 _postHandlingAdvices),
-          _uploadPath(_rootPath + "uploads"),
-          _connectionNum(0)
-    {
-    }
+    HttpAppFrameworkImpl();
 
     virtual const Json::Value &getCustomConfig() const override
     {
         return _jsonConfig["custom_config"];
     }
 
-    virtual PluginBase *getPlugin(const std::string &name) override
-    {
-        return _pluginsManager.getPlugin(name);
-    }
-
+    virtual PluginBase *getPlugin(const std::string &name) override;
     virtual void addListener(const std::string &ip,
                              uint16_t port,
                              bool useSSL = false,
@@ -98,8 +65,8 @@ class HttpAppFrameworkImpl : public HttpAppFramework
     virtual void registerHttpSimpleController(
         const std::string &pathName,
         const std::string &crtlName,
-        const std::vector<any> &filtersAndMethods =
-            std::vector<any>()) override;
+        const std::vector<internal::HttpConstraint> &filtersAndMethods =
+            std::vector<internal::HttpConstraint>{}) override;
 
     virtual void setCustom404Page(const HttpResponsePtr &resp) override
     {
@@ -115,12 +82,7 @@ class HttpAppFrameworkImpl : public HttpAppFramework
     virtual void forward(
         const HttpRequestPtr &req,
         std::function<void(const HttpResponsePtr &)> &&callback,
-        const std::string &hostString = "") override
-    {
-        forward(std::dynamic_pointer_cast<HttpRequestImpl>(req),
-                std::move(callback),
-                hostString);
-    }
+        const std::string &hostString = "") override;
 
     void forward(const HttpRequestImplPtr &req,
                  std::function<void(const HttpResponsePtr &)> &&callback,
@@ -205,6 +167,12 @@ class HttpAppFrameworkImpl : public HttpAppFramework
     {
         return _uploadPath;
     }
+    virtual const std::shared_ptr<trantor::Resolver> &getResolver()
+        const override
+    {
+        static auto resolver = trantor::Resolver::newResolver(getLoop());
+        return resolver;
+    }
     virtual void setUploadPath(const std::string &uploadPath) override;
     virtual void setFileTypes(const std::vector<std::string> &types) override;
     virtual void enableDynamicViewsLoading(
@@ -236,14 +204,8 @@ class HttpAppFrameworkImpl : public HttpAppFramework
     {
         return _useGzip;
     }
-    virtual void setStaticFilesCacheTime(int cacheTime) override
-    {
-        _staticFileRouter.setStaticFilesCacheTime(cacheTime);
-    }
-    virtual int staticFilesCacheTime() const override
-    {
-        return _staticFileRouter.staticFilesCacheTime();
-    }
+    virtual void setStaticFilesCacheTime(int cacheTime) override;
+    virtual int staticFilesCacheTime() const override;
     virtual void setIdleConnectionTimeout(size_t timeout) override
     {
         _idleConnectionTimeout = timeout;
@@ -256,10 +218,7 @@ class HttpAppFrameworkImpl : public HttpAppFramework
     {
         _pipeliningRequestsNumber = number;
     }
-    virtual void setGzipStatic(bool useGzipStatic) override
-    {
-        _staticFileRouter.setGzipStatic(useGzipStatic);
-    }
+    virtual void setGzipStatic(bool useGzipStatic) override;
     virtual void setClientMaxBodySize(size_t maxSize) override
     {
         _clientMaxBodySize = maxSize;
@@ -304,19 +263,13 @@ class HttpAppFrameworkImpl : public HttpAppFramework
         return _pipeliningRequestsNumber;
     }
 
-    virtual ~HttpAppFrameworkImpl() noexcept
-    {
-        // Destroy the following objects before _loop destruction
-        _sharedLibManagerPtr.reset();
-        _sessionMapPtr.reset();
-    }
-
+    virtual ~HttpAppFrameworkImpl() noexcept;
     virtual bool isRunning() override
     {
         return _running;
     }
 
-    virtual trantor::EventLoop *getLoop() override;
+    virtual trantor::EventLoop *getLoop() const override;
 
     virtual void quit() override
     {
@@ -331,12 +284,27 @@ class HttpAppFrameworkImpl : public HttpAppFramework
         _serverHeader = "Server: " + server + "\r\n";
     }
 
+    virtual void enableServerHeader(bool flag) override
+    {
+        _enableServerHeader = flag;
+    }
+    virtual void enableDateHeader(bool flag) override
+    {
+        _enableDateHeader = flag;
+    }
+    bool sendServerHeader() const
+    {
+        return _enableServerHeader;
+    }
+    bool sendDateHeader() const
+    {
+        return _enableDateHeader;
+    }
     const std::string &getServerHeaderString() const
     {
         return _serverHeader;
     }
 
-#if USE_ORM
     virtual orm::DbClientPtr getDbClient(
         const std::string &name = "default") override;
     virtual orm::DbClientPtr getFastDbClient(
@@ -351,7 +319,6 @@ class HttpAppFrameworkImpl : public HttpAppFramework
                                 const std::string &filename = "",
                                 const std::string &name = "default",
                                 const bool isFast = false) override;
-#endif
 
     inline static HttpAppFrameworkImpl &instance()
     {
@@ -377,7 +344,7 @@ class HttpAppFrameworkImpl : public HttpAppFramework
         const HttpRequestImplPtr &req,
         std::function<void(const HttpResponsePtr &)> &&callback,
         const WebSocketConnectionImplPtr &wsConnPtr);
-    void onConnection(const TcpConnectionPtr &conn);
+    void onConnection(const trantor::TcpConnectionPtr &conn);
     void addHttpPath(const std::string &path,
                      const internal::HttpBinderBasePtr &binder,
                      const std::vector<HttpMethod> &validMethods,
@@ -389,19 +356,18 @@ class HttpAppFrameworkImpl : public HttpAppFramework
     size_t _sessionTimeout = 0;
     size_t _idleConnectionTimeout = 60;
     bool _useSession = false;
-    std::vector<
-        std::tuple<std::string, uint16_t, bool, std::string, std::string>>
-        _listeners;
     std::string _serverHeader =
         "Server: drogon/" + drogon::getVersion() + "\r\n";
 
-    typedef std::shared_ptr<Session> SessionPtr;
-    std::unique_ptr<CacheMap<std::string, SessionPtr>> _sessionMapPtr;
+    const std::unique_ptr<StaticFileRouter> _staticFileRouterPtr;
+    const std::unique_ptr<HttpControllersRouter> _httpCtrlsRouterPtr;
+    const std::unique_ptr<HttpSimpleControllersRouter>
+        _httpSimpleCtrlsRouterPtr;
+    const std::unique_ptr<WebsocketControllersRouter> _websockCtrlsRouterPtr;
 
-    HttpControllersRouter _httpCtrlsRouter;
-    HttpSimpleControllersRouter _httpSimpleCtrlsRouter;
-    StaticFileRouter _staticFileRouter;
-    WebsocketControllersRouter _websockCtrlsRouter;
+    const std::unique_ptr<ListenerManager> _listenerManagerPtr;
+    const std::unique_ptr<PluginsManager> _pluginsManagerPtr;
+    const std::unique_ptr<orm::DbClientManager> _dbClientManagerPtr;
 
     std::string _rootPath = "./";
     std::string _uploadPath;
@@ -434,27 +400,13 @@ class HttpAppFrameworkImpl : public HttpAppFramework
     size_t _clientMaxMemoryBodySize = 64 * 1024;
     size_t _clientMaxWebSocketMessageSize = 128 * 1024;
     std::string _homePageFile = "index.html";
-
+    std::unique_ptr<SessionManager> _sessionManagerPtr;
     // Json::Value _customConfig;
     Json::Value _jsonConfig;
-    PluginsManager _pluginsManager;
     HttpResponsePtr _custom404;
-#if USE_ORM
-    std::map<std::string, orm::DbClientPtr> _dbClientsMap;
-    struct DbInfo
-    {
-        std::string _name;
-        std::string _connectionInfo;
-        orm::ClientType _dbType;
-        bool _isFast;
-        size_t _connectionNumber;
-    };
-    std::vector<DbInfo> _dbInfos;
-    std::map<std::string, std::map<trantor::EventLoop *, orm::DbClientPtr>>
-        _dbFastClientsMap;
-    void createDbClients(const std::vector<trantor::EventLoop *> &ioloops);
-#endif
     static InitBeforeMainFunction _initFirst;
+    bool _enableServerHeader = true;
+    bool _enableDateHeader = true;
     std::vector<std::function<bool(const trantor::InetAddress &,
                                    const trantor::InetAddress &)>>
         _newConnectionAdvices;

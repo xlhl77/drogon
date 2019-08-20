@@ -13,9 +13,14 @@
  */
 
 #include "WebsocketControllersRouter.h"
+#include "HttpRequestImpl.h"
+#include "HttpResponseImpl.h"
+#include "WebSocketConnectionImpl.h"
 #include "FiltersFunction.h"
-#include "HttpAppFrameworkImpl.h"
-#ifdef USE_OPENSSL
+#include <drogon/HttpFilter.h>
+#include <drogon/WebSocketController.h>
+#include <drogon/config.h>
+#ifdef OpenSSL_FOUND
 #include <openssl/sha.h>
 #else
 #include "ssl_funcs/Sha1.h"

@@ -14,17 +14,16 @@
 
 #pragma once
 
-#include "HttpResponseImpl.h"
-#include <drogon/WebSocketConnection.h>
-#include <list>
-#include <mutex>
+#include "impl_forwards.h"
+#include <trantor/utils/NonCopyable.h>
 #include <trantor/net/TcpConnection.h>
 #include <trantor/utils/MsgBuffer.h>
+#include <list>
+#include <mutex>
 
-using namespace trantor;
 namespace drogon
 {
-class HttpResponseParser
+class HttpResponseParser : public trantor::NonCopyable
 {
   public:
     enum class HttpResponseParseState
@@ -39,23 +38,24 @@ class HttpResponseParser
         kGotAll,
     };
 
-    explicit HttpResponseParser(const trantor::TcpConnectionPtr &connPtr);
+    HttpResponseParser();
 
     // default copy-ctor, dtor and assignment are fine
 
     // return false if any error
-    bool parseResponse(MsgBuffer *buf);
+    bool parseResponse(trantor::MsgBuffer *buf);
 
     bool gotAll() const
     {
         return _state == HttpResponseParseState::kGotAll;
     }
 
-    void reset()
+    void setForHeadMethod()
     {
-        _state = HttpResponseParseState::kExpectResponseLine;
-        _response.reset(new HttpResponseImpl);
+        _parseResponseForHeadMethod = true;
     }
+
+    void reset();
 
     const HttpResponseImplPtr &responseImpl() const
     {
@@ -67,6 +67,7 @@ class HttpResponseParser
 
     HttpResponseParseState _state;
     HttpResponseImplPtr _response;
+    bool _parseResponseForHeadMethod = false;
 };
 
 }  // namespace drogon

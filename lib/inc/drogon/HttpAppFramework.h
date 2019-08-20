@@ -14,33 +14,30 @@
 
 #pragma once
 
-#include <drogon/config.h>
-#if USE_ORM
-#include <drogon/orm/DbClient.h>
-#endif
-#include <chrono>
+#include <drogon/utils/HttpConstraint.h>
 #include <drogon/CacheMap.h>
 #include <drogon/DrObject.h>
 #include <drogon/HttpBinder.h>
-#include <drogon/HttpClient.h>
-#include <drogon/HttpFilter.h>
-#include <drogon/HttpRequest.h>
-#include <drogon/HttpResponse.h>
 #include <drogon/IntranetIpFilter.h>
 #include <drogon/LocalHostFilter.h>
 #include <drogon/MultiPart.h>
 #include <drogon/NotFound.h>
-#include <drogon/plugins/Plugin.h>
+#include <drogon/drogon_callbacks.h>
 #include <drogon/utils/ClassTraits.h>
 #include <drogon/utils/Utilities.h>
-#include <drogon/version.h>
+#include <drogon/plugins/Plugin.h>
+#include <drogon/HttpRequest.h>
+#include <drogon/HttpResponse.h>
+#include <drogon/orm/DbClient.h>
+#include <trantor/net/Resolver.h>
+#include <trantor/net/EventLoop.h>
+#include <trantor/utils/NonCopyable.h>
 #include <functional>
 #include <memory>
 #include <string>
-#include <trantor/net/EventLoop.h>
-#include <trantor/utils/NonCopyable.h>
 #include <type_traits>
 #include <vector>
+#include <chrono>
 
 namespace drogon
 {
@@ -52,20 +49,13 @@ const char banner[] =
     "| (_| | | | (_) | (_| | (_) | | | |\n"
     " \\__,_|_|  \\___/ \\__, |\\___/|_| |_|\n"
     "                 |___/             \n";
-inline std::string getVersion()
-{
-    return VERSION;
-}
-inline std::string getGitCommit()
-{
-    return VERSION_MD5;
-}
+
+std::string getVersion();
+std::string getGitCommit();
 
 class HttpControllerBase;
 class HttpSimpleControllerBase;
 class WebSocketControllerBase;
-typedef std::function<void(const HttpResponsePtr &)> AdviceCallback;
-typedef std::function<void()> AdviceChainCallback;
 
 class HttpAppFramework : public trantor::NonCopyable
 {
@@ -112,7 +102,7 @@ class HttpAppFramework : public trantor::NonCopyable
      * User can run some timer tasks or other tasks in this loop;
      * This method can be call in any thread.
      */
-    virtual trantor::EventLoop *getLoop() = 0;
+    virtual trantor::EventLoop *getLoop() const = 0;
 
     /// Set custom 404 page
     /**
@@ -299,7 +289,8 @@ class HttpAppFramework : public trantor::NonCopyable
     virtual void registerHttpSimpleController(
         const std::string &pathName,
         const std::string &ctrlName,
-        const std::vector<any> &filtersAndMethods = std::vector<any>()) = 0;
+        const std::vector<internal::HttpConstraint> &filtersAndMethods =
+            std::vector<internal::HttpConstraint>{}) = 0;
 
     /// Register a handler into the framework.
     /**
@@ -335,7 +326,8 @@ class HttpAppFramework : public trantor::NonCopyable
     void registerHandler(
         const std::string &pathPattern,
         FUNCTION &&function,
-        const std::vector<any> &filtersAndMethods = std::vector<any>(),
+        const std::vector<internal::HttpConstraint> &filtersAndMethods =
+            std::vector<internal::HttpConstraint>{},
         const std::string &handlerName = "")
     {
         LOG_TRACE << "pathPattern:" << pathPattern;
@@ -348,22 +340,17 @@ class HttpAppFramework : public trantor::NonCopyable
         std::vector<std::string> filters;
         for (auto const &filterOrMethod : filtersAndMethods)
         {
-            if (filterOrMethod.type() == typeid(std::string))
+            if (filterOrMethod.type() == internal::ConstraintType::HttpFilter)
             {
-                filters.push_back(*any_cast<std::string>(&filterOrMethod));
+                filters.push_back(filterOrMethod.getFilterName());
             }
-            else if (filterOrMethod.type() == typeid(const char *))
+            else if (filterOrMethod.type() ==
+                     internal::ConstraintType::HttpMethod)
             {
-                filters.push_back(*any_cast<const char *>(&filterOrMethod));
-            }
-            else if (filterOrMethod.type() == typeid(HttpMethod))
-            {
-                validMethods.push_back(*any_cast<HttpMethod>(&filterOrMethod));
+                validMethods.push_back(filterOrMethod.getHttpMethod());
             }
             else
             {
-                std::cerr << "Invalid controller constraint type:"
-                          << filterOrMethod.type().name() << std::endl;
                 LOG_ERROR << "Invalid controller constraint type";
                 exit(1);
             }
@@ -719,6 +706,16 @@ class HttpAppFramework : public trantor::NonCopyable
      */
     virtual void setServerHeaderField(const std::string &server) = 0;
 
+    /// Control if the 'Server' header or the 'Date' header is added to each
+    /// HTTP response.
+    /**
+     * NOTE:
+     * These operations can be performed by options in the configuration file.
+     * The headers are sent to clients by default.
+     */
+    virtual void enableServerHeader(bool flag) = 0;
+    virtual void enableDateHeader(bool flag) = 0;
+
     /// Set the maximum number of requests that can be served through one
     /// keep-alive connection.
     /**
@@ -790,7 +787,6 @@ class HttpAppFramework : public trantor::NonCopyable
      */
     virtual void setHomePage(const std::string &homePageFile) = 0;
 
-#if USE_ORM
     /// Get a database client by @param name
     /**
      * NOTE:
@@ -833,7 +829,14 @@ class HttpAppFramework : public trantor::NonCopyable
                                 const std::string &filename = "",
                                 const std::string &name = "default",
                                 const bool isFast = false) = 0;
-#endif
+
+    /// Get the DNS resolver
+    /**
+     * NOTE:
+     * When the c-ares library is installed in the system, it runs with the best
+     * performance.
+     */
+    virtual const std::shared_ptr<trantor::Resolver> &getResolver() const = 0;
 
   private:
     virtual void registerHttpController(

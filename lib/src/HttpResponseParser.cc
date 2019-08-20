@@ -13,12 +13,21 @@
  */
 
 #include "HttpResponseParser.h"
+#include "HttpResponseImpl.h"
 #include <iostream>
 #include <trantor/utils/Logger.h>
 #include <trantor/utils/MsgBuffer.h>
 using namespace trantor;
 using namespace drogon;
-HttpResponseParser::HttpResponseParser(const trantor::TcpConnectionPtr &connPtr)
+
+void HttpResponseParser::reset()
+{
+    _state = HttpResponseParseState::kExpectResponseLine;
+    _response.reset(new HttpResponseImpl);
+    _parseResponseForHeadMethod = false;
+}
+
+HttpResponseParser::HttpResponseParser()
     : _state(HttpResponseParseState::kExpectResponseLine),
       _response(new HttpResponseImpl)
 {
@@ -137,6 +146,12 @@ bool HttpResponseParser::parseResponse(MsgBuffer *buf)
                                 hasMore = true;
                             }
                         }
+                    }
+                    if (_parseResponseForHeadMethod)
+                    {
+                        _response->_leftBodyLength = 0;
+                        _state = HttpResponseParseState::kGotAll;
+                        hasMore = false;
                     }
                 }
                 buf->retrieveUntil(crlf + 2);

@@ -14,15 +14,15 @@
 
 #pragma once
 
-#include <drogon/config.h>
+#include <drogon/utils/string_view.h>
+#include <drogon/utils/any.h>
 #include <trantor/utils/Logger.h>
 #include <trantor/utils/MsgBuffer.h>
-
 #include <sstream>
-#include <stdarg.h>
-#include <stdio.h>
 #include <string>
 #include <unordered_map>
+#include <stdarg.h>
+#include <stdio.h>
 
 namespace drogon
 {
@@ -135,7 +135,50 @@ class HttpViewData
      * < --> &lt;
      * > --> &gt;
      */
-    static std::string htmlTranslate(const std::string &str);
+
+    static std::string htmlTranslate(const char *str, size_t length);
+    static std::string htmlTranslate(const std::string &str)
+    {
+        return htmlTranslate(str.data(), str.length());
+    }
+    static std::string htmlTranslate(const string_view &str)
+    {
+        return htmlTranslate(str.data(), str.length());
+    }
+    static bool needTranslation(const std::string &str)
+    {
+        for (auto const &c : str)
+        {
+            switch (c)
+            {
+                case '"':
+                case '&':
+                case '<':
+                case '>':
+                    return true;
+                default:
+                    continue;
+            }
+        }
+        return false;
+    }
+    static bool needTranslation(const string_view &str)
+    {
+        for (auto const &c : str)
+        {
+            switch (c)
+            {
+                case '"':
+                case '&':
+                case '<':
+                case '>':
+                    return true;
+                default:
+                    continue;
+            }
+        }
+        return false;
+    }
 
   protected:
     typedef std::unordered_map<std::string, any> ViewDataMap;

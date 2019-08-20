@@ -15,8 +15,6 @@
 #include "HttpResponseImpl.h"
 #include "HttpAppFrameworkImpl.h"
 #include "HttpUtils.h"
-#include <drogon/HttpAppFramework.h>
-#include <drogon/HttpViewBase.h>
 #include <drogon/HttpViewData.h>
 #include <fstream>
 #include <memory>
@@ -26,6 +24,24 @@
 
 using namespace trantor;
 using namespace drogon;
+
+namespace drogon
+{
+static HttpResponsePtr genHttpResponse(std::string viewName,
+                                       const HttpViewData &data)
+{
+    auto templ = DrTemplateBase::newTemplate(viewName);
+    if (templ)
+    {
+        auto res = HttpResponse::newHttpResponse();
+        res->setStatusCode(k200OK);
+        res->setContentTypeCode(CT_TEXT_HTML);
+        res->setBody(templ->genText(data));
+        return res;
+    }
+    return drogon::HttpResponse::newNotFoundResponse();
+}
+}  // namespace drogon
 
 HttpResponsePtr HttpResponse::newHttpResponse()
 {
@@ -78,7 +94,7 @@ HttpResponsePtr HttpResponse::newRedirectionResponse(
 HttpResponsePtr HttpResponse::newHttpViewResponse(const std::string &viewName,
                                                   const HttpViewData &data)
 {
-    return HttpViewBase::genHttpResponse(viewName, data);
+    return genHttpResponse(viewName, data);
 }
 
 HttpResponsePtr HttpResponse::newFileResponse(
@@ -191,34 +207,46 @@ void HttpResponseImpl::makeHeaderString(
         headerStringPtr->append(it->second);
         headerStringPtr->append("\r\n");
     }
-    headerStringPtr->append(
-        HttpAppFrameworkImpl::instance().getServerHeaderString());
+    if (HttpAppFrameworkImpl::instance().sendServerHeader())
+    {
+        headerStringPtr->append(
+            HttpAppFrameworkImpl::instance().getServerHeaderString());
+    }
 }
 
 std::shared_ptr<std::string> HttpResponseImpl::renderToString() const
 {
     if (_expriedTime >= 0)
     {
-        if (_datePos != std::string::npos)
+        if (drogon::HttpAppFrameworkImpl::instance().sendDateHeader())
         {
-            auto now = trantor::Date::now();
-            bool isDateChanged = ((now.microSecondsSinceEpoch() /
-                                   MICRO_SECONDS_PRE_SEC) != _httpStringDate);
-            assert(_httpString);
-            if (isDateChanged)
+            if (_datePos != std::string::npos)
             {
-                _httpStringDate =
-                    now.microSecondsSinceEpoch() / MICRO_SECONDS_PRE_SEC;
-                auto newDate = utils::getHttpFullDate(now);
+                auto now = trantor::Date::now();
+                bool isDateChanged =
+                    ((now.microSecondsSinceEpoch() / MICRO_SECONDS_PRE_SEC) !=
+                     _httpStringDate);
+                assert(_httpString);
+                if (isDateChanged)
+                {
+                    _httpStringDate =
+                        now.microSecondsSinceEpoch() / MICRO_SECONDS_PRE_SEC;
+                    auto newDate = utils::getHttpFullDate(now);
 
-                _httpString = std::make_shared<std::string>(*_httpString);
-                memcpy((void *)&(*_httpString)[_datePos],
-                       newDate,
-                       strlen(newDate));
+                    _httpString = std::make_shared<std::string>(*_httpString);
+                    memcpy((void *)&(*_httpString)[_datePos],
+                           newDate,
+                           strlen(newDate));
+                    return _httpString;
+                }
+
                 return _httpString;
             }
-
-            return _httpString;
+        }
+        else
+        {
+            if (_httpString)
+                return _httpString;
         }
     }
     auto httpString = std::make_shared<std::string>();
@@ -242,16 +270,23 @@ std::shared_ptr<std::string> HttpResponseImpl::renderToString() const
     }
 
     // output Date header
-    httpString->append("Date: ");
-    auto datePos = httpString->length();
-    httpString->append(utils::getHttpFullDate(trantor::Date::date()));
-    httpString->append("\r\n\r\n");
+    if (drogon::HttpAppFrameworkImpl::instance().sendDateHeader())
+    {
+        httpString->append("Date: ");
+        auto datePos = httpString->length();
+        httpString->append(utils::getHttpFullDate(trantor::Date::date()));
+        httpString->append("\r\n\r\n");
+        _datePos = datePos;
+    }
+    else
+    {
+        httpString->append("\r\n");
+    }
 
     LOG_TRACE << "reponse(no body):" << httpString->c_str();
     httpString->append(*_bodyPtr);
     if (_expriedTime >= 0)
     {
-        _datePos = datePos;
         _httpString = httpString;
     }
     return httpString;
@@ -280,9 +315,16 @@ std::shared_ptr<std::string> HttpResponseImpl::renderHeaderForHeadMethod() const
     }
 
     // output Date header
-    httpString->append("Date: ");
-    httpString->append(utils::getHttpFullDate(trantor::Date::date()));
-    httpString->append("\r\n\r\n");
+    if (drogon::HttpAppFrameworkImpl::instance().sendDateHeader())
+    {
+        httpString->append("Date: ");
+        httpString->append(utils::getHttpFullDate(trantor::Date::date()));
+        httpString->append("\r\n\r\n");
+    }
+    else
+    {
+        httpString->append("\r\n");
+    }
 
     return httpString;
 }
@@ -381,7 +423,7 @@ void HttpResponseImpl::addHeader(const char *start,
     }
 }
 
-void HttpResponseImpl::swap(HttpResponseImpl &that)
+void HttpResponseImpl::swap(HttpResponseImpl &that) noexcept
 {
     using std::swap;
     _headers.swap(that._headers);

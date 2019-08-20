@@ -14,40 +14,26 @@
 
 #pragma once
 
-#include "HttpRequestImpl.h"
-#include "WebSocketConnectionImpl.h"
-#include <drogon/WebSocketController.h>
-#include <drogon/config.h>
-#include <functional>
-#include <string>
+#include "impl_forwards.h"
 #include <trantor/net/TcpServer.h>
 #include <trantor/net/callbacks.h>
 #include <trantor/utils/NonCopyable.h>
+#include <functional>
+#include <string>
+#include <vector>
 
-using namespace trantor;
 namespace drogon
 {
-class HttpRequest;
-class HttpResponse;
-typedef std::shared_ptr<HttpRequest> HttpRequestPtr;
 class HttpServer : trantor::NonCopyable
 {
   public:
-    typedef std::function<void(const HttpRequestImplPtr &,
-                               std::function<void(const HttpResponsePtr &)> &&)>
-        HttpAsyncCallback;
-    typedef std::function<void(const HttpRequestImplPtr &,
-                               std::function<void(const HttpResponsePtr &)> &&,
-                               const WebSocketConnectionImplPtr &)>
-        WebSocketNewAsyncCallback;
-
-    HttpServer(EventLoop *loop,
-               const InetAddress &listenAddr,
+    HttpServer(trantor::EventLoop *loop,
+               const trantor::InetAddress &listenAddr,
                const std::string &name);
 
     ~HttpServer();
 
-    EventLoop *getLoop() const
+    trantor::EventLoop *getLoop() const
     {
         return _server.getLoop();
     }
@@ -60,9 +46,14 @@ class HttpServer : trantor::NonCopyable
     {
         _newWebsocketCallback = cb;
     }
-    void setConnectionCallback(const ConnectionCallback &cb)
+    void setConnectionCallback(const trantor::ConnectionCallback &cb)
     {
         _connectionCallback = cb;
+    }
+    void setIoLoopThreadPool(
+        const std::shared_ptr<trantor::EventLoopThreadPool> &pool)
+    {
+        _server.setIoLoopThreadPool(pool);
     }
     void setIoLoopNum(int numThreads)
     {
@@ -82,20 +73,24 @@ class HttpServer : trantor::NonCopyable
     }
     void start();
 
-#ifdef USE_OPENSSL
     void enableSSL(const std::string &certPath, const std::string &keyPath)
     {
         _server.enableSSL(certPath, keyPath);
     }
-#endif
 
   private:
-    void onConnection(const TcpConnectionPtr &conn);
-    void onMessage(const TcpConnectionPtr &, MsgBuffer *);
-    void onRequest(const TcpConnectionPtr &, const HttpRequestImplPtr &);
-    void sendResponse(const TcpConnectionPtr &,
+    void onConnection(const trantor::TcpConnectionPtr &conn);
+    void onMessage(const trantor::TcpConnectionPtr &, trantor::MsgBuffer *);
+    void onRequests(const trantor::TcpConnectionPtr &,
+                    const std::vector<HttpRequestImplPtr> &,
+                    const std::shared_ptr<HttpRequestParser> &);
+    void sendResponse(const trantor::TcpConnectionPtr &,
                       const HttpResponsePtr &,
                       bool isHeadMethod);
+    void sendResponses(
+        const trantor::TcpConnectionPtr &conn,
+        const std::vector<std::pair<HttpResponsePtr, bool>> &responses,
+        trantor::MsgBuffer &buffer);
     trantor::TcpServer _server;
     HttpAsyncCallback _httpAsyncCallback;
     WebSocketNewAsyncCallback _newWebsocketCallback;

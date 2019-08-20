@@ -13,8 +13,8 @@
  */
 
 #include "ConfigLoader.h"
-
-#include <drogon/HttpAppFramework.h>
+#include "HttpAppFrameworkImpl.h"
+#include <drogon/config.h>
 #include <fstream>
 #include <iostream>
 #include <sstream>
@@ -130,7 +130,7 @@ static void loadLogSetting(const Json::Value &log)
     {
         auto baseName = log.get("logfile_base_name", "").asString();
         auto logSize = log.get("log_size_limit", 100000000).asUInt64();
-        drogon::app().setLogPath(logPath, baseName, logSize);
+        HttpAppFrameworkImpl::instance().setLogPath(logPath, baseName, logSize);
     }
     auto logLevel = log.get("log_level", "DEBUG").asString();
     if (logLevel == "TRACE")
@@ -160,7 +160,7 @@ static void loadControllers(const Json::Value &controllers)
         auto ctrlName = controller.get("controller", "").asString();
         if (path == "" || ctrlName == "")
             continue;
-        std::vector<any> constraints;
+        std::vector<internal::HttpConstraint> constraints;
         if (!controller["http_methods"].isNull())
         {
             for (auto const &method : controller["http_methods"])
@@ -212,7 +212,7 @@ static void loadApp(const Json::Value &app)
     {
         // set the number to the number of processors.
         threadsNum = std::thread::hardware_concurrency();
-        LOG_DEBUG << "The number of processors is " << threadsNum;
+        LOG_TRACE << "The number of processors is " << threadsNum;
     }
     if (threadsNum < 1)
         threadsNum = 1;
@@ -301,6 +301,10 @@ static void loadApp(const Json::Value &app)
     auto server = app.get("server_header_field", "").asString();
     if (!server.empty())
         drogon::app().setServerHeaderField(server);
+    auto sendServerHeader = app.get("enable_server_header", true).asBool();
+    drogon::app().enableServerHeader(sendServerHeader);
+    auto sendDateHeader = app.get("enable_date_header", true).asBool();
+    drogon::app().enableDateHeader(sendDateHeader);
     auto keepaliveReqs = app.get("keepalive_requests", 0).asUInt64();
     drogon::app().setKeepaliveRequestsNumber(keepaliveReqs);
     auto pipeliningReqs = app.get("pipelining_requests", 0).asUInt64();
@@ -316,7 +320,7 @@ static void loadApp(const Json::Value &app)
     else
     {
         std::cerr << "Error format of client_max_body_size" << std::endl;
-        exit(-1);
+        exit(1);
     }
     auto maxMemoryBodySize =
         app.get("client_max_memory_body_size", "64K").asString();
@@ -327,7 +331,7 @@ static void loadApp(const Json::Value &app)
     else
     {
         std::cerr << "Error format of client_max_memory_body_size" << std::endl;
-        exit(-1);
+        exit(1);
     }
     auto maxWsMsgSize =
         app.get("client_max_websocket_message_size", "128K").asString();
@@ -339,7 +343,7 @@ static void loadApp(const Json::Value &app)
     {
         std::cerr << "Error format of client_max_websocket_message_size"
                   << std::endl;
-        exit(-1);
+        exit(1);
     }
     drogon::app().setHomePage(app.get("home_page", "index.html").asString());
 }
@@ -347,7 +351,6 @@ static void loadDbClients(const Json::Value &dbClients)
 {
     if (!dbClients)
         return;
-#if USE_ORM
     for (auto const &client : dbClients)
     {
         auto type = client.get("rdbms", "postgresql").asString();
@@ -377,12 +380,6 @@ static void loadDbClients(const Json::Value &dbClients)
                                      name,
                                      isFast);
     }
-#else
-    std::cout << "No database is supported by drogon, please install the "
-                 "database development library first."
-              << std::endl;
-    exit(1);
-#endif
 }
 static void loadListeners(const Json::Value &listeners)
 {

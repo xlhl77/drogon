@@ -15,7 +15,6 @@
 #include "WebSocketConnectionImpl.h"
 #include "HttpAppFrameworkImpl.h"
 #include <thread>
-#include <trantor/net/TcpConnection.h>
 #include <trantor/net/inner/TcpConnectionImpl.h>
 
 using namespace drogon;
@@ -154,19 +153,6 @@ void WebSocketConnectionImpl::WebSocketConnectionImpl::shutdown()
 void WebSocketConnectionImpl::WebSocketConnectionImpl::forceClose()
 {
     _tcpConn->forceClose();
-}
-
-void WebSocketConnectionImpl::setContext(const any &context)
-{
-    _context = context;
-}
-const any &WebSocketConnectionImpl::WebSocketConnectionImpl::getContext() const
-{
-    return _context;
-}
-any *WebSocketConnectionImpl::WebSocketConnectionImpl::getMutableContext()
-{
-    return &_context;
 }
 
 void WebSocketConnectionImpl::setPingMessage(

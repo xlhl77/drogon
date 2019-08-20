@@ -15,6 +15,7 @@
 #include "DbClientLockFree.h"
 #include "DbConnection.h"
 #include "TransactionImpl.h"
+#include <drogon/config.h>
 #if USE_POSTGRESQL
 #include "postgresql_impl/PgConnection.h"
 #endif
@@ -41,8 +42,9 @@ using namespace drogon::orm;
 
 DbClientLockFree::DbClientLockFree(const std::string &connInfo,
                                    trantor::EventLoop *loop,
-                                   ClientType type)
-    : _connInfo(connInfo), _loop(loop)
+                                   ClientType type,
+                                   size_t connectionNumberPerLoop)
+    : _connInfo(connInfo), _loop(loop), _connectionNum(connectionNumberPerLoop)
 {
     _type = type;
     LOG_TRACE << "type=" << (int)type;
@@ -100,23 +102,90 @@ void DbClientLockFree::execSql(
         }
         return;
     }
-    else
+    else if (_sqlCmdBuffer.empty() && _transCallbacks.empty())
     {
+#if (!LIBPQ_SUPPORTS_BATCH_MODE)
         for (auto &conn : _connections)
         {
             if (!conn->isWorking() &&
                 (_transSet.empty() || _transSet.find(conn) == _transSet.end()))
             {
-                conn->execSql(std::move(sql),
-                              paraNum,
-                              std::move(parameters),
-                              std::move(length),
-                              std::move(format),
-                              std::move(rcb),
-                              std::move(exceptCallback));
+                conn->execSql(
+                    std::move(sql),
+                    paraNum,
+                    std::move(parameters),
+                    std::move(length),
+                    std::move(format),
+                    [rcb = std::move(rcb), this](const Result &r) {
+                        if (_sqlCmdBuffer.empty())
+                        {
+                            rcb(r);
+                        }
+                        else
+                        {
+                            _loop->queueInLoop(
+                                [rcb = std::move(rcb), r]() { rcb(r); });
+                        }
+                    },
+                    std::move(exceptCallback));
                 return;
             }
         }
+#else
+        if (_type != ClientType::PostgreSQL)
+        {
+            for (auto &conn : _connections)
+            {
+                if (!conn->isWorking() &&
+                    (_transSet.empty() ||
+                     _transSet.find(conn) == _transSet.end()))
+                {
+                    conn->execSql(
+                        std::move(sql),
+                        paraNum,
+                        std::move(parameters),
+                        std::move(length),
+                        std::move(format),
+                        [rcb = std::move(rcb), this](const Result &r) {
+                            if (_sqlCmdBuffer.empty())
+                            {
+                                rcb(r);
+                            }
+                            else
+                            {
+                                _loop->queueInLoop(
+                                    [rcb = std::move(rcb), r]() { rcb(r); });
+                            }
+                        },
+                        std::move(exceptCallback));
+                    return;
+                }
+            }
+        }
+        else
+        {
+            /// pg batch mode
+            for (size_t i = 0; i < _connections.size(); i++)
+            {
+                auto &conn = _connections[_connectionPos++];
+                if (_connectionPos >= _connections.size())
+                    _connectionPos = 0;
+                if (_transSet.empty() ||
+                    _transSet.find(conn) == _transSet.end())
+                {
+                    conn->execSql(std::move(sql),
+                                  paraNum,
+                                  std::move(parameters),
+                                  std::move(length),
+                                  std::move(format),
+                                  std::move(rcb),
+                                  std::move(exceptCallback));
+                    return;
+                }
+            }
+        }
+
+#endif
     }
 
     if (_sqlCmdBuffer.size() > 20000)
@@ -134,14 +203,23 @@ void DbClientLockFree::execSql(
     }
 
     // LOG_TRACE << "Push query to buffer";
-    _sqlCmdBuffer.emplace_back(
-        std::make_shared<SqlCmd>(std::move(sql),
-                                 paraNum,
-                                 std::move(parameters),
-                                 std::move(length),
-                                 std::move(format),
-                                 std::move(rcb),
-                                 std::move(exceptCallback)));
+    _sqlCmdBuffer.emplace_back(std::make_shared<SqlCmd>(
+        std::move(sql),
+        paraNum,
+        std::move(parameters),
+        std::move(length),
+        std::move(format),
+        [rcb = std::move(rcb), this](const Result &r) {
+            if (_sqlCmdBuffer.empty())
+            {
+                rcb(r);
+            }
+            else
+            {
+                _loop->queueInLoop([rcb = std::move(rcb), r]() { rcb(r); });
+            }
+        },
+        std::move(exceptCallback)));
 }
 
 std::shared_ptr<Transaction> DbClientLockFree::newTransaction(
@@ -238,15 +316,37 @@ void DbClientLockFree::handleNewTask(const DbConnectionPtr &conn)
 
     if (!_sqlCmdBuffer.empty())
     {
-        auto cmdPtr = std::move(_sqlCmdBuffer.front());
+#if LIBPQ_SUPPORTS_BATCH_MODE
+        if (_type != ClientType::PostgreSQL)
+        {
+            auto &cmd = _sqlCmdBuffer.front();
+            conn->execSql(std::move(cmd->_sql),
+                          cmd->_paraNum,
+                          std::move(cmd->_parameters),
+                          std::move(cmd->_length),
+                          std::move(cmd->_format),
+                          std::move(cmd->_cb),
+                          std::move(cmd->_exceptCb));
+            _sqlCmdBuffer.pop_front();
+        }
+        else
+        {
+            std::deque<std::shared_ptr<SqlCmd>> cmds;
+            using std::swap;
+            swap(cmds, _sqlCmdBuffer);
+            conn->batchSql(std::move(cmds));
+        }
+#else
+        auto &cmd = _sqlCmdBuffer.front();
+        conn->execSql(std::move(cmd->_sql),
+                      cmd->_paraNum,
+                      std::move(cmd->_parameters),
+                      std::move(cmd->_length),
+                      std::move(cmd->_format),
+                      std::move(cmd->_cb),
+                      std::move(cmd->_exceptCb));
         _sqlCmdBuffer.pop_front();
-        conn->execSql(std::move(cmdPtr->_sql),
-                      cmdPtr->_paraNum,
-                      std::move(cmdPtr->_parameters),
-                      std::move(cmdPtr->_length),
-                      std::move(cmdPtr->_format),
-                      std::move(cmdPtr->_cb),
-                      std::move(cmdPtr->_exceptCb));
+#endif
         return;
     }
 }

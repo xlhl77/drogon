@@ -13,10 +13,12 @@
  */
 
 #include "HttpControllersRouter.h"
-#include "HttpAppFrameworkImpl.h"
-#include "FiltersFunction.h"
+#include "AOPAdvice.h"
 #include "HttpRequestImpl.h"
 #include "HttpResponseImpl.h"
+#include "StaticFileRouter.h"
+#include "HttpAppFrameworkImpl.h"
+#include "FiltersFunction.h"
 
 using namespace drogon;
 
@@ -30,7 +32,7 @@ void HttpControllersRouter::doWhenNoHandlerFound(
         !HttpAppFrameworkImpl::instance().getHomePage().empty())
     {
         req->setPath("/" + HttpAppFrameworkImpl::instance().getHomePage());
-        drogon::app().forward(req, std::move(callback));
+        HttpAppFrameworkImpl::instance().forward(req, std::move(callback));
         return;
     }
     _fileRouter.route(req,
@@ -389,7 +391,7 @@ void HttpControllersRouter::doControllerHandler(
         {
             // make a copy response;
             auto newResp = std::make_shared<HttpResponseImpl>(
-                *std::dynamic_pointer_cast<HttpResponseImpl>(responsePtr));
+                *static_cast<HttpResponseImpl *>(responsePtr.get()));
             newResp->setExpiredTime(-1);  // make it temporary
             newResp->addCookie("JSESSIONID", sessionId);
             invokeCallback(callback, req, newResp);
@@ -444,8 +446,7 @@ void HttpControllersRouter::doControllerHandler(
             if (resp->expiredTime() >= 0)
             {
                 // cache the response;
-                std::dynamic_pointer_cast<HttpResponseImpl>(resp)
-                    ->makeHeaderString();
+                static_cast<HttpResponseImpl *>(resp.get())->makeHeaderString();
                 auto loop = req->getLoop();
                 if (loop->isInLoopThread())
                 {
@@ -464,7 +465,7 @@ void HttpControllersRouter::doControllerHandler(
                 {
                     // make a copy
                     newResp = std::make_shared<HttpResponseImpl>(
-                        *std::dynamic_pointer_cast<HttpResponseImpl>(resp));
+                        *static_cast<HttpResponseImpl *>(resp.get()));
                     newResp->setExpiredTime(-1);  // make it temporary
                 }
                 newResp->addCookie("JSESSIONID", sessionId);

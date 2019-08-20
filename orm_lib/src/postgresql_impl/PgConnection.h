@@ -16,15 +16,16 @@
 
 #include "../DbConnection.h"
 #include <drogon/orm/DbClient.h>
-#include <functional>
-#include <iostream>
-#include <libpq-fe.h>
-#include <memory>
-#include <string>
 #include <trantor/net/EventLoop.h>
 #include <trantor/net/inner/Channel.h>
 #include <trantor/utils/NonCopyable.h>
+#include <libpq-fe.h>
 #include <unordered_map>
+#include <memory>
+#include <string>
+#include <functional>
+#include <iostream>
+#include <list>
 
 namespace drogon
 {
@@ -79,6 +80,10 @@ class PgConnection : public DbConnection,
                 });
         }
     }
+
+    virtual void batchSql(
+        std::deque<std::shared_ptr<SqlCmd>> &&sqlCommands) override;
+
     virtual void disconnect() override;
 
   private:
@@ -98,13 +103,21 @@ class PgConnection : public DbConnection,
         std::vector<int> &&format,
         ResultCallback &&rcb,
         std::function<void(const std::exception_ptr &)> &&exceptCallback);
-    // std::function<void()> _preparingCallback;
     void doAfterPreparing();
     std::string _statementName;
     int _paraNum;
     std::vector<const char *> _parameters;
     std::vector<int> _length;
     std::vector<int> _format;
+    int flush();
+    void handleFatalError();
+#if LIBPQ_SUPPORTS_BATCH_MODE
+    std::list<std::shared_ptr<SqlCmd>> _batchCommandsForWaitingResults;
+    std::deque<std::shared_ptr<SqlCmd>> _batchSqlCommands;
+    void sendBatchedSql();
+    int sendBatchEnd();
+    bool _sendBatchEnd = false;
+#endif
 };
 
 }  // namespace orm

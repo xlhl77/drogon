@@ -15,18 +15,17 @@
 #pragma once
 
 #include "HttpUtils.h"
-#include <atomic>
 #include <drogon/HttpResponse.h>
 #include <drogon/utils/Utilities.h>
-#include <memory>
-#include <mutex>
-#include <string>
 #include <trantor/net/InetAddress.h>
 #include <trantor/utils/Date.h>
 #include <trantor/utils/MsgBuffer.h>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <atomic>
 #include <unordered_map>
 
-using namespace trantor;
 namespace drogon
 {
 class HttpResponseImpl : public HttpResponse
@@ -97,6 +96,15 @@ class HttpResponseImpl : public HttpResponse
     {
         _contentType = type;
         setContentType(webContentTypeToString(type));
+    }
+
+    virtual void setContentTypeCodeAndCustomString(
+        ContentType type,
+        const char *typeString,
+        size_t typeStringLength) override
+    {
+        _contentType = type;
+        setContentType(string_view{typeString, typeStringLength});
     }
 
     // virtual void setContentTypeCodeAndCharacterSet(ContentType type, const
@@ -252,7 +260,7 @@ class HttpResponseImpl : public HttpResponse
     {
         return *_bodyPtr;
     }
-    void swap(HttpResponseImpl &that);
+    void swap(HttpResponseImpl &that) noexcept;
     void parseJson() const;
     virtual const std::shared_ptr<Json::Value> jsonObject() const override
     {
@@ -329,4 +337,10 @@ class HttpResponseImpl : public HttpResponse
     }
 };
 typedef std::shared_ptr<HttpResponseImpl> HttpResponseImplPtr;
+
+inline void swap(HttpResponseImpl &one, HttpResponseImpl &two) noexcept
+{
+    one.swap(two);
+}
+
 }  // namespace drogon

@@ -17,14 +17,14 @@
 #include "../DbConnection.h"
 #include "MysqlResultImpl.h"
 #include <drogon/orm/DbClient.h>
+#include <trantor/net/EventLoop.h>
+#include <trantor/net/inner/Channel.h>
+#include <trantor/utils/NonCopyable.h>
 #include <functional>
 #include <iostream>
 #include <memory>
 #include <mysql.h>
 #include <string>
-#include <trantor/net/EventLoop.h>
-#include <trantor/net/inner/Channel.h>
-#include <trantor/utils/NonCopyable.h>
 
 namespace drogon
 {
@@ -80,6 +80,12 @@ class MysqlConnection : public DbConnection,
                                            std::move(exceptCallback));
                 });
         }
+    }
+    virtual void batchSql(
+        std::deque<std::shared_ptr<SqlCmd>> &&sqlCommands) override
+    {
+        LOG_FATAL << "The mysql library does not support batch mode";
+        exit(1);
     }
     virtual void disconnect() override;
 

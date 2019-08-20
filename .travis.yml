@@ -1,12 +1,11 @@
-os:
-  - linux
-  - osx
-
-osx_image: xcode10.1
+matrix:
+  include:
+    - os: linux
+      dist: xenial
+    - os: osx
+      osx_image: xcode11
 
 sudo: required
-
-dist: xenial
 
 language: cpp
 
@@ -15,6 +14,7 @@ addons:
     sources:
     - xenial
     - sourceline: 'deb http://archive.ubuntu.com/ubuntu xenial main'
+    - sourceline: 'ppa:mhier/libboost-latest'
     packages:
     - gcc
     - g++
@@ -27,6 +27,7 @@ addons:
     - libsqlite3-dev
     - build-essential
     - cmake
+    - boost1.67
   homebrew:
     packages:
     - jsoncpp
@@ -35,10 +36,16 @@ addons:
     - cmake
     - libtool
     - lz4
-    - postgresql
     - mariadb
     - sqlite3
-    update: true
+before_script:
+  - if [ "$TRAVIS_OS_NAME" = "osx" ]; then 
+       brew services restart postgresql; 
+       sleep 2;
+       psql -c 'create user postgres superuser;' postgres; 
+    fi
 
+services:
+  - postgresql
 script:
-  - ./build.sh && ./test.sh
+  - ./build.sh -t && ./test.sh -t

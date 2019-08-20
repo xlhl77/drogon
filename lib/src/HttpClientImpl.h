@@ -14,14 +14,15 @@
 
 #pragma once
 
-#include "HttpResponseImpl.h"
+#include "impl_forwards.h"
 #include <drogon/HttpClient.h>
 #include <drogon/Cookie.h>
+#include <trantor/net/EventLoop.h>
+#include <trantor/net/TcpClient.h>
+#include <trantor/net/Resolver.h>
 #include <mutex>
 #include <queue>
 #include <vector>
-#include <trantor/net/EventLoop.h>
-#include <trantor/net/TcpClient.h>
 
 namespace drogon
 {
@@ -82,7 +83,8 @@ class HttpClientImpl : public HttpClient,
     void sendRequestInLoop(const HttpRequestPtr &req,
                            const HttpReqCallback &callback);
     void handleCookies(const HttpResponseImplPtr &resp);
-    std::queue<HttpReqCallback> _pipeliningCallbacks;
+    void createTcpClient();
+    std::queue<std::pair<HttpRequestPtr, HttpReqCallback>> _pipeliningCallbacks;
     std::queue<std::pair<HttpRequestPtr, HttpReqCallback>> _requestsBuffer;
     void onRecvMessage(const trantor::TcpConnectionPtr &, trantor::MsgBuffer *);
     void onError(ReqResult result);
@@ -92,6 +94,8 @@ class HttpClientImpl : public HttpClient,
     std::vector<Cookie> _validCookies;
     size_t _bytesSent = 0;
     size_t _bytesReceived = 0;
+    bool _dns = false;
+    std::shared_ptr<trantor::Resolver> _resolver;
 };
 typedef std::shared_ptr<HttpClientImpl> HttpClientImplPtr;
 }  // namespace drogon

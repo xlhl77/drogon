@@ -36,7 +36,25 @@ Result makeResult(
 
 }  // namespace orm
 }  // namespace drogon
-
+int PgConnection::flush()
+{
+    auto ret = PQflush(_connPtr.get());
+    if (ret == 1)
+    {
+        if (!_channel.isWriting())
+        {
+            _channel.enableWriting();
+        }
+    }
+    else if (ret == 0)
+    {
+        if (_channel.isWriting())
+        {
+            _channel.disableWriting();
+        }
+    }
+    return ret;
+}
 PgConnection::PgConnection(trantor::EventLoop *loop,
                            const std::string &connInfo)
     : DbConnection(loop),
@@ -45,7 +63,13 @@ PgConnection::PgConnection(trantor::EventLoop *loop,
       _channel(loop, PQsocket(_connPtr.get()))
 {
     PQsetnonblocking(_connPtr.get(), 1);
-    // assert(PQisnonblocking(_connPtr.get()));
+    if (_channel.fd() < 0)
+    {
+        LOG_FATAL << "Socket fd < 0, Usually this is because the number of "
+                     "files opened by the program exceeds the system "
+                     "limit. Please use the ulimit command to check.";
+        exit(1);
+    }
     _channel.setReadCallback([=]() {
         if (_status != ConnectStatus_Ok)
         {
@@ -57,23 +81,28 @@ PgConnection::PgConnection(trantor::EventLoop *loop,
         }
     });
     _channel.setWriteCallback([=]() {
-        if (_status != ConnectStatus_Ok)
+        if (_status == ConnectStatus_Ok)
         {
-            pgPoll();
+            auto ret = PQflush(_connPtr.get());
+            if (ret == 0)
+            {
+                _channel.disableWriting();
+                return;
+            }
+            else if (ret < 0)
+            {
+                _channel.disableWriting();
+                LOG_ERROR << "PQflush error:" << PQerrorMessage(_connPtr.get());
+                return;
+            }
         }
         else
         {
-            PQconsumeInput(_connPtr.get());
+            pgPoll();
         }
     });
-    _channel.setCloseCallback([=]() {
-        perror("sock close");
-        handleClosed();
-    });
-    _channel.setErrorCallback([=]() {
-        perror("sock err");
-        handleClosed();
-    });
+    _channel.setCloseCallback([=]() { handleClosed(); });
+    _channel.setErrorCallback([=]() { handleClosed(); });
     _channel.enableReading();
     _channel.enableWriting();
 }
@@ -183,21 +212,13 @@ void PgConnection::execSqlInLoop(
             {
                 _isWorking = false;
                 _isRreparingStatement = false;
-                try
-                {
-                    throw Failure(PQerrorMessage(_connPtr.get()));
-                }
-                catch (...)
-                {
-                    auto exceptPtr = std::current_exception();
-                    _exceptCb(exceptPtr);
-                    _exceptCb = nullptr;
-                }
+                handleFatalError();
                 _cb = nullptr;
                 _idleCb();
             }
             return;
         }
+        flush();
     }
     else
     {
@@ -219,16 +240,7 @@ void PgConnection::execSqlInLoop(
                 {
                     _isWorking = false;
                     _isRreparingStatement = false;
-                    try
-                    {
-                        throw Failure(PQerrorMessage(_connPtr.get()));
-                    }
-                    catch (...)
-                    {
-                        auto exceptPtr = std::current_exception();
-                        _exceptCb(exceptPtr);
-                        _exceptCb = nullptr;
-                    }
+                    handleFatalError();
                     _cb = nullptr;
                     _idleCb();
                 }
@@ -250,16 +262,7 @@ void PgConnection::execSqlInLoop(
                 if (_isWorking)
                 {
                     _isWorking = false;
-                    try
-                    {
-                        throw Failure(PQerrorMessage(_connPtr.get()));
-                    }
-                    catch (...)
-                    {
-                        auto exceptPtr = std::current_exception();
-                        _exceptCb(exceptPtr);
-                        _exceptCb = nullptr;
-                    }
+                    handleFatalError();
                     _cb = nullptr;
                     _idleCb();
                 }
@@ -270,8 +273,8 @@ void PgConnection::execSqlInLoop(
             _length = std::move(length);
             _format = std::move(format);
         }
+        flush();
     }
-    pgPoll();
 }
 
 void PgConnection::handleRead()
@@ -286,16 +289,7 @@ void PgConnection::handleRead()
         if (_isWorking)
         {
             _isWorking = false;
-            try
-            {
-                throw BrokenConnection(PQerrorMessage(_connPtr.get()));
-            }
-            catch (...)
-            {
-                auto exceptPtr = std::current_exception();
-                _exceptCb(exceptPtr);
-                _exceptCb = nullptr;
-            }
+            handleFatalError();
             _cb = nullptr;
         }
         handleClosed();
@@ -306,8 +300,6 @@ void PgConnection::handleRead()
         // need read more data from socket;
         return;
     }
-    if (_channel.isWriting())
-        _channel.disableWriting();
     while ((res = std::shared_ptr<PGresult>(PQgetResult(_connPtr.get()),
                                             [](PGresult *p) { PQclear(p); })))
     {
@@ -317,16 +309,7 @@ void PgConnection::handleRead()
             LOG_WARN << PQerrorMessage(_connPtr.get());
             if (_isWorking)
             {
-                try
-                {
-                    // TODO: exception type
-                    throw SqlError(PQerrorMessage(_connPtr.get()), _sql);
-                }
-                catch (...)
-                {
-                    _exceptCb(std::current_exception());
-                    _exceptCb = nullptr;
-                }
+                handleFatalError();
                 _cb = nullptr;
             }
         }
@@ -375,19 +358,30 @@ void PgConnection::doAfterPreparing()
         if (_isWorking)
         {
             _isWorking = false;
-            try
-            {
-                throw Failure(PQerrorMessage(_connPtr.get()));
-            }
-            catch (...)
-            {
-                auto exceptPtr = std::current_exception();
-                _exceptCb(exceptPtr);
-                _exceptCb = nullptr;
-            }
+            handleFatalError();
             _cb = nullptr;
             _idleCb();
         }
         return;
     }
+    flush();
+}
+
+void PgConnection::handleFatalError()
+{
+    try
+    {
+        throw Failure(PQerrorMessage(_connPtr.get()));
+    }
+    catch (...)
+    {
+        auto exceptPtr = std::current_exception();
+        _exceptCb(exceptPtr);
+        _exceptCb = nullptr;
+    }
+}
+
+void PgConnection::batchSql(std::deque<std::shared_ptr<SqlCmd>> &&sqlCommands)
+{
+    assert(false);
 }

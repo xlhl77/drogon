@@ -15,6 +15,7 @@
 #include "HttpRequestParser.h"
 #include "HttpAppFrameworkImpl.h"
 #include "HttpResponseImpl.h"
+#include "HttpRequestImpl.h"
 #include "HttpUtils.h"
 #include <drogon/HttpTypes.h>
 #include <iostream>
@@ -82,7 +83,11 @@ bool HttpRequestParser::processRequestLine(const char *begin, const char *end)
     }
     return succeed;
 }
-
+void HttpRequestParser::reset()
+{
+    _state = HttpRequestParseState_ExpectMethod;
+    _request.reset(new HttpRequestImpl(_loop));
+}
 // Return false if any error
 bool HttpRequestParser::parseRequest(MsgBuffer *buf)
 {
@@ -202,8 +207,7 @@ bool HttpRequestParser::parseRequest(MsgBuffer *buf)
                             {
                                 resp->setStatusCode(k413RequestEntityTooLarge);
                                 auto httpString =
-                                    std::dynamic_pointer_cast<HttpResponseImpl>(
-                                        resp)
+                                    static_cast<HttpResponseImpl *>(resp.get())
                                         ->renderToString();
                                 reset();
                                 connPtr->send(httpString);
@@ -212,8 +216,7 @@ bool HttpRequestParser::parseRequest(MsgBuffer *buf)
                             {
                                 resp->setStatusCode(k100Continue);
                                 auto httpString =
-                                    std::dynamic_pointer_cast<HttpResponseImpl>(
-                                        resp)
+                                    static_cast<HttpResponseImpl *>(resp.get())
                                         ->renderToString();
                                 connPtr->send(httpString);
                             }
@@ -300,10 +303,7 @@ void HttpRequestParser::pushRquestToPipelining(const HttpRequestPtr &req)
         conn->getLoop()->assertInLoopThread();
     }
 #endif
-    std::pair<HttpRequestPtr, HttpResponsePtr> reqPair(req,
-                                                       HttpResponseImplPtr());
-
-    _requestPipelining.push_back(std::move(reqPair));
+    _requestPipelining.push_back({req, {nullptr, false}});
 }
 
 HttpRequestPtr HttpRequestParser::getFirstRequest() const
@@ -319,10 +319,10 @@ HttpRequestPtr HttpRequestParser::getFirstRequest() const
     {
         return _requestPipelining.front().first;
     }
-    return HttpRequestImplPtr();
+    return nullptr;
 }
 
-HttpResponsePtr HttpRequestParser::getFirstResponse() const
+std::pair<HttpResponsePtr, bool> HttpRequestParser::getFirstResponse() const
 {
 #ifndef NDEBUG
     auto conn = _conn.lock();
@@ -335,7 +335,7 @@ HttpResponsePtr HttpRequestParser::getFirstResponse() const
     {
         return _requestPipelining.front().second;
     }
-    return HttpResponseImplPtr();
+    return {nullptr, false};
 }
 
 void HttpRequestParser::popFirstRequest()
@@ -351,7 +351,8 @@ void HttpRequestParser::popFirstRequest()
 }
 
 void HttpRequestParser::pushResponseToPipelining(const HttpRequestPtr &req,
-                                                 const HttpResponsePtr &resp)
+                                                 const HttpResponsePtr &resp,
+                                                 bool isHeadMethod)
 {
 #ifndef NDEBUG
     auto conn = _conn.lock();
@@ -364,7 +365,7 @@ void HttpRequestParser::pushResponseToPipelining(const HttpRequestPtr &req,
     {
         if (iter.first == req)
         {
-            iter.second = resp;
+            iter.second = {resp, isHeadMethod};
             return;
         }
     }

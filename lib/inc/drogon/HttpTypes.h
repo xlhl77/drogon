@@ -13,7 +13,6 @@
 
 #pragma once
 #include <atomic>
-#include <drogon/config.h>
 #include <thread>
 
 namespace drogon
@@ -82,6 +81,7 @@ enum ContentType
     CT_TEXT_XML,
     CT_APPLICATION_XML,
     CT_TEXT_XSL,
+    CT_APPLICATION_WASM,
     CT_APPLICATION_OCTET_STREAM,
     CT_APPLICATION_X_FONT_TRUETYPE,
     CT_APPLICATION_X_FONT_OPENTYPE,
@@ -116,6 +116,16 @@ enum class ReqResult
     NetworkFailure,
     BadServerAddress,
     Timeout
+};
+
+enum class WebSocketMessageType
+{
+    Text,
+    Binary,
+    Ping,
+    Pong,
+    Close,
+    Unknown
 };
 
 }  // namespace drogon

@@ -25,7 +25,7 @@ using namespace drogon;
 
 void HttpRequestImpl::parseParameters() const
 {
-    auto input = query();
+    auto input = queryView();
     if (input.empty())
         return;
     std::string type = getHeaderBy("content-type");
@@ -102,7 +102,7 @@ void HttpRequestImpl::parseParameters() const
     // }
 }
 
-void HttpRequestImpl::appendToBuffer(MsgBuffer *output) const
+void HttpRequestImpl::appendToBuffer(trantor::MsgBuffer *output) const
 {
     switch (_method)
     {
@@ -394,7 +394,7 @@ HttpRequestPtr HttpRequest::newFileUploadRequest(
     return std::make_shared<HttpFileUploadRequest>(files);
 }
 
-void HttpRequestImpl::swap(HttpRequestImpl &that)
+void HttpRequestImpl::swap(HttpRequestImpl &that) noexcept
 {
     std::swap(_method, that._method);
     std::swap(_version, that._version);

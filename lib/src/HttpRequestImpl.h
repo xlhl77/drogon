@@ -18,24 +18,18 @@
 #include "CacheFile.h"
 #include <drogon/utils/Utilities.h>
 #include <drogon/HttpRequest.h>
-#include <drogon/HttpResponse.h>
 #include <drogon/utils/Utilities.h>
-
 #include <trantor/net/EventLoop.h>
 #include <trantor/net/InetAddress.h>
 #include <trantor/utils/Logger.h>
 #include <trantor/utils/MsgBuffer.h>
 #include <trantor/utils/NonCopyable.h>
-
 #include <algorithm>
-#include <assert.h>
-#include <stdio.h>
 #include <string>
 #include <thread>
 #include <unordered_map>
-
-using std::string;
-using namespace trantor;
+#include <assert.h>
+#include <stdio.h>
 
 namespace drogon
 {
@@ -126,13 +120,29 @@ class HttpRequestImpl : public HttpRequest
         _query = query;
     }
 
-    virtual string_view body() const override
+    string_view bodyView() const
     {
         if (_cacheFilePtr)
         {
             return _cacheFilePtr->getStringView();
         }
         return _content;
+    }
+    virtual const char *bodyData() const override
+    {
+        if (_cacheFilePtr)
+        {
+            return _cacheFilePtr->getStringView().data();
+        }
+        return _content.data();
+    }
+    virtual size_t bodyLength() const override
+    {
+        if (_cacheFilePtr)
+        {
+            return _cacheFilePtr->getStringView().length();
+        }
+        return _content.length();
     }
 
     void appendToBody(const char *data, size_t length)
@@ -149,9 +159,9 @@ class HttpRequestImpl : public HttpRequest
 
     void reserveBodySize();
 
-    virtual string_view query() const override
+    string_view queryView() const
     {
-        if (_query != "")
+        if (!_query.empty())
             return _query;
         if (_method == Post)
         {
@@ -159,6 +169,11 @@ class HttpRequestImpl : public HttpRequest
                 return _cacheFilePtr->getStringView();
             return _content;
         }
+        return _query;
+    }
+
+    virtual const std::string &query() const override
+    {
         return _query;
     }
 
@@ -260,7 +275,7 @@ class HttpRequestImpl : public HttpRequest
         return _content;
     }
 
-    void swap(HttpRequestImpl &that);
+    void swap(HttpRequestImpl &that) noexcept;
 
     void setContent(const std::string &content)
     {
@@ -289,7 +304,7 @@ class HttpRequestImpl : public HttpRequest
         _cookies[key] = value;
     }
 
-    void appendToBuffer(MsgBuffer *output) const;
+    void appendToBuffer(trantor::MsgBuffer *output) const;
 
     virtual SessionPtr session() const override
     {
@@ -326,9 +341,13 @@ class HttpRequestImpl : public HttpRequest
         return _contentType;
     }
 
-    virtual const string_view &matchedPathPattern() const override
+    virtual const char *matchedPathPatternData() const override
     {
-        return _matchedPathPattern;
+        return _matchedPathPattern.data();
+    }
+    virtual size_t matchedPathPatternLength() const override
+    {
+        return _matchedPathPattern.length();
     }
 
     void setMatchedPathPattern(const std::string &pathPattern)
@@ -386,5 +405,10 @@ class HttpRequestImpl : public HttpRequest
 };
 
 typedef std::shared_ptr<HttpRequestImpl> HttpRequestImplPtr;
+
+inline void swap(HttpRequestImpl &one, HttpRequestImpl &two) noexcept
+{
+    one.swap(two);
+}
 
 }  // namespace drogon

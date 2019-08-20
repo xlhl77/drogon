@@ -14,18 +14,17 @@
 
 #pragma once
 
-#include "HttpRequestImpl.h"
-#include "WebSocketConnectionImpl.h"
-#include <deque>
-#include <drogon/HttpResponse.h>
-#include <mutex>
+#include "impl_forwards.h"
+#include <drogon/HttpTypes.h>
+#include <trantor/utils/NonCopyable.h>
 #include <trantor/net/TcpConnection.h>
 #include <trantor/utils/MsgBuffer.h>
+#include <mutex>
+#include <deque>
 
-using namespace trantor;
 namespace drogon
 {
-class HttpRequestParser
+class HttpRequestParser : public trantor::NonCopyable
 {
   public:
     enum HttpRequestParseState
@@ -40,18 +39,14 @@ class HttpRequestParser
     explicit HttpRequestParser(const trantor::TcpConnectionPtr &connPtr);
 
     // return false if any error
-    bool parseRequest(MsgBuffer *buf);
+    bool parseRequest(trantor::MsgBuffer *buf);
 
     bool gotAll() const
     {
         return _state == HttpRequestParseState_GotAll;
     }
 
-    void reset()
-    {
-        _state = HttpRequestParseState_ExpectMethod;
-        _request.reset(new HttpRequestImpl(_loop));
-    }
+    void reset();
 
     const HttpRequestImplPtr &requestImpl() const
     {
@@ -78,10 +73,11 @@ class HttpRequestParser
     // to support request pipelining(rfc2616-8.1.2.2)
     void pushRquestToPipelining(const HttpRequestPtr &req);
     HttpRequestPtr getFirstRequest() const;
-    HttpResponsePtr getFirstResponse() const;
+    std::pair<HttpResponsePtr, bool> getFirstResponse() const;
     void popFirstRequest();
     void pushResponseToPipelining(const HttpRequestPtr &req,
-                                  const HttpResponsePtr &resp);
+                                  const HttpResponsePtr &resp,
+                                  bool isHeadMethod);
     size_t numberOfRequestsInPipelining() const
     {
         return _requestPipelining.size();
@@ -98,6 +94,10 @@ class HttpRequestParser
     {
         return _requestsCounter;
     }
+    trantor::MsgBuffer &getBuffer()
+    {
+        return _sendBuffer;
+    }
 
   private:
     void shutdownConnection(HttpStatusCode code);
@@ -107,10 +107,12 @@ class HttpRequestParser
     HttpRequestImplPtr _request;
     bool _firstRequest = true;
     WebSocketConnectionImplPtr _websockConnPtr;
-    std::deque<std::pair<HttpRequestPtr, HttpResponsePtr>> _requestPipelining;
+    std::deque<std::pair<HttpRequestPtr, std::pair<HttpResponsePtr, bool>>>
+        _requestPipelining;
     size_t _requestsCounter = 0;
     std::weak_ptr<trantor::TcpConnection> _conn;
     bool _stopWorking = false;
+    trantor::MsgBuffer _sendBuffer;
 };
 
 }  // namespace drogon

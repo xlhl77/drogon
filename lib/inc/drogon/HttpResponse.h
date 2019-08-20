@@ -13,6 +13,7 @@
 
 #pragma once
 
+#include <drogon/utils/string_view.h>
 #include <drogon/Cookie.h>
 #include <drogon/HttpTypes.h>
 #include <drogon/HttpViewData.h>
@@ -61,10 +62,31 @@ class HttpResponse
     /// Get the status set by the setCloseConnetion() method.
     virtual bool ifCloseConnection() const = 0;
 
-    /// Set the reponse content type, such as text/html, text/plaint, image/png
+    /// Set the response content type, such as text/html, text/plaint, image/png
     /// and so on. If the content type
     /// is a text type, the character set is utf8.
     virtual void setContentTypeCode(ContentType type) = 0;
+
+    /// Set the response content type and the content-type string, The string
+    /// must contain the header name and CRLF.
+    /// For example, "content-type: text/plain\r\n"
+    void setContentTypeCodeAndCustomString(ContentType type,
+                                           const string_view &typeString)
+    {
+        setContentTypeCodeAndCustomString(type,
+                                          typeString.data(),
+                                          typeString.length());
+    }
+    template <int N>
+    void setContentTypeCodeAndCustomString(ContentType type,
+                                           const char (&typeString)[N])
+    {
+        assert(N > 0);
+        setContentTypeCodeAndCustomString(type, typeString, N - 1);
+    }
+    virtual void setContentTypeCodeAndCustomString(ContentType type,
+                                                   const char *typeString,
+                                                   size_t typeStringLength) = 0;
 
     /// Set the reponse content type and the character set.
     /// virtual void setContentTypeCodeAndCharacterSet(ContentType type, const
@@ -113,7 +135,7 @@ class HttpResponse
     /// If there is no the cookie, the @param defaultCookie is retured.
     virtual const Cookie &getCookie(
         const std::string &key,
-        const Cookie &defaultCookie = Cookie()) const = 0;
+        const Cookie &defaultCookie = Cookie{}) const = 0;
 
     /// Get all cookies.
     virtual const std::unordered_map<std::string, Cookie> &cookies() const = 0;
