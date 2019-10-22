@@ -15,6 +15,7 @@
 #include "../../lib/src/DbClientManager.h"
 #include "DbClientLockFree.h"
 #include <drogon/config.h>
+#include <drogon/HttpAppFramework.h>
 #include <drogon/utils/Utilities.h>
 #include <algorithm>
 
@@ -30,24 +31,28 @@ void DbClientManager::createDbClients(
     {
         if (dbInfo._isFast)
         {
-            for (auto *loop : ioloops)
+            if (dbInfo._dbType == drogon::orm::ClientType::Sqlite3)
             {
-                if (dbInfo._dbType == drogon::orm::ClientType::Sqlite3)
-                {
-                    LOG_ERROR << "Sqlite3 don't support fast mode";
-                    abort();
-                }
-                if (dbInfo._dbType == drogon::orm::ClientType::PostgreSQL ||
-                    dbInfo._dbType == drogon::orm::ClientType::Mysql)
-                {
-                    _dbFastClientsMap[dbInfo._name][loop] =
-                        std::shared_ptr<drogon::orm::DbClient>(
-                            new drogon::orm::DbClientLockFree(
-                                dbInfo._connectionInfo,
-                                loop,
-                                dbInfo._dbType,
-                                dbInfo._connectionNumber));
-                }
+                LOG_ERROR << "Sqlite3 don't support fast mode";
+                abort();
+            }
+            if (dbInfo._dbType == drogon::orm::ClientType::PostgreSQL ||
+                dbInfo._dbType == drogon::orm::ClientType::Mysql)
+            {
+                _dbFastClientsMap[dbInfo._name] =
+                    IOThreadStorage<orm::DbClientPtr>();
+                _dbFastClientsMap[dbInfo._name].init([&](orm::DbClientPtr &c,
+                                                         size_t idx) {
+                    assert(idx == ioloops[idx]->index());
+                    LOG_TRACE << "create fast database client for the thread "
+                              << idx;
+                    c = std::shared_ptr<orm::DbClient>(
+                        new drogon::orm::DbClientLockFree(
+                            dbInfo._connectionInfo,
+                            ioloops[idx],
+                            dbInfo._dbType,
+                            dbInfo._connectionNumber));
+                });
             }
         }
         else

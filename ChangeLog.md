@@ -4,6 +4,78 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.0.0-beta8] - 2019-10-03
+
+### API change list
+
+- Add length() method to the Field class.
+
+- Add `as<bool>()` function template specialization to the Field class.
+
+- Add add attribute store methods to the HttpRequest class.
+
+- Add the setCustomContentTypeString() method to the HttpRequest class.
+
+- Add thread storage.
+
+
+### Changed
+
+- Use .find('x') instead of .find("x") in a string search.
+
+- Add the ability to create restful API controllers.
+
+### Fixed
+
+- Fix a bug of creating models for mysql.
+
+- Fix a bug when HTTP method is PUT.
+
+- Fix a bug when using 'is null' substatement in ORM.
+
+- Fix a sqlite3 bug when some SQL errors occur.
+
+- Fix bug with parsing json.
+
+- Fix url decode.
+
+- Fix a error in HttpClient.
+
+- Fix a error in setThreadNum method.
+
+- Fix some race conditions.
+
+## [1.0.0-beta7] - 2019-08-31
+
+### API change list
+
+- Remove the default value parameter of some methods (#220)
+
+### Changed
+
+- Optimize DNS in HttpClient and WebSocketClient (support c-ares library).
+
+- Reduce dependencies between declarations.
+
+- Add database tests in the travis CI and add test cases to database tests.
+
+- Reduce size of docker image.
+
+- Make the framework API support chained calls.
+  
+- Add a synchronous join point for AOP.
+
+- Modify the CMakeLists to modern cmake style.
+
+### Fixed
+
+- Fix bugs in default return values of functions(#220),
+
+- Fix a bug in the cmake configuration file when there's '+' in the building path.
+
+- Fix a bug in drogon_ctl (when creating orm models)
+
+
 ## [1.0.0-beta6] - 2019-08-08
 
 ### API change list
@@ -106,7 +178,11 @@ All notable changes to this project will be documented in this file.
 
 ## [1.0.0-beta1] - 2019-06-11
 
-[Unreleased]: https://github.com/an-tao/drogon/compare/v1.0.0-beta6...HEAD
+[Unreleased]: https://github.com/an-tao/drogon/compare/v1.0.0-beta8...HEAD
+
+[1.0.0-beta8]: https://github.com/an-tao/drogon/compare/v1.0.0-beta7...v1.0.0-beta8
+
+[1.0.0-beta7]: https://github.com/an-tao/drogon/compare/v1.0.0-beta6...v1.0.0-beta7
 
 [1.0.0-beta6]: https://github.com/an-tao/drogon/compare/v1.0.0-beta5...v1.0.0-beta6
 

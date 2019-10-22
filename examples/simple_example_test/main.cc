@@ -14,7 +14,6 @@
 
 // Make a http client to test the example server app;
 
-#include <drogon/config.h>
 #include <drogon/drogon.h>
 #include <trantor/net/EventLoopThread.h>
 #include <trantor/net/TcpClient.h>
@@ -165,14 +164,14 @@ void doTest(const HttpClientPtr &client,
     /// Post json
     Json::Value json;
     json["request"] = "json";
-    req = HttpRequest::newHttpJsonRequest(json);
+    req = HttpRequest::newCustomHttpRequest(json);
     req->setMethod(drogon::Post);
     req->setPath("/api/v1/apitest/json");
     client->sendRequest(req,
                         [=](ReqResult result, const HttpResponsePtr &resp) {
                             if (result == ReqResult::Ok)
                             {
-                                auto ret = resp->getJsonObject();
+                                std::shared_ptr<Json::Value> ret = *resp;
                                 if (ret && (*ret)["result"].asString() == "ok")
                                 {
                                     outputGood(req, isHttps);
@@ -705,6 +704,7 @@ void doTest(const HttpClientPtr &client,
                                 {
                                     LOG_DEBUG << resp->getBody().length();
                                     LOG_ERROR << "Error!";
+                                    LOG_ERROR << resp->getBody();
                                     exit(1);
                                 }
                             }
@@ -872,61 +872,63 @@ void doTest(const HttpClientPtr &client,
                                 exit(1);
                             }
                         });
-    /// Test pipelining
-    // req = HttpRequest::newHttpRequest();
-    // req->setPath("/pipe");
-    // auto flag = std::make_shared<int>(0);
-    // client->sendRequest(req, [=](ReqResult result, const HttpResponsePtr
-    // &resp) {
-    //     if (result == ReqResult::Ok)
-    //     {
-    //         if (resp->statusCode() == k200OK && *flag == 0)
-    //         {
-    //             ++(*flag);
-    //             outputGood(req, isHttps);
-    //         }
-    //         else
-    //         {
-    //             LOG_DEBUG << resp->getBody();
-    //             LOG_ERROR << "Error!";
-    //             exit(1);
-    //         }
-    //     }
-    //     else
-    //     {
-    //         LOG_ERROR << "Error!";
-    //         exit(1);
-    //     }
-    // });
-    // req = HttpRequest::newHttpRequest();
-    // req->setPath("/pipe");
-    // client->sendRequest(req, [=](ReqResult result, const HttpResponsePtr
-    // &resp) {
-    //     if (result == ReqResult::Ok)
-    //     {
-    //         if (resp->statusCode() == k200OK && *flag == 1)
-    //         {
-    //             ++(*flag);
-    //             outputGood(req, isHttps);
-    //         }
-    //         else
-    //         {
-    //             LOG_DEBUG << resp->getBody();
-    //             LOG_ERROR << "Error!";
-    //             exit(1);
-    //         }
-    //     }
-    //     else
-    //     {
-    //         LOG_ERROR << "Error!";
-    //         exit(1);
-    //     }
-    // });
+    /// Test synchronous advice
+    req = HttpRequest::newHttpRequest();
+    req->setPath("/plaintext");
+    client->sendRequest(req,
+                        [=](ReqResult result, const HttpResponsePtr &resp) {
+                            if (result == ReqResult::Ok)
+                            {
+                                if (resp->getBody() == "Hello, World!")
+                                {
+                                    outputGood(req, isHttps);
+                                }
+                                else
+                                {
+                                    LOG_DEBUG << resp->getBody();
+                                    LOG_ERROR << "Error!";
+                                    exit(1);
+                                }
+                            }
+                            else
+                            {
+                                LOG_ERROR << "Error!";
+                                exit(1);
+                            }
+                        });
     /// Test form post
     req = HttpRequest::newHttpFormPostRequest();
     req->setPath("/api/v1/apitest/form");
     req->setParameter("k1", "1");
     req->setParameter("k2", "安");
+    req->setParameter("k3", "test@example.com");
+    client->sendRequest(req,
+                        [=](ReqResult result, const HttpResponsePtr &resp) {
+                            if (result == ReqResult::Ok)
+                            {
+                                auto ret = resp->getJsonObject();
+                                if (ret && (*ret)["result"].asString() == "ok")
+                                {
+                                    outputGood(req, isHttps);
+                                }
+                                else
+                                {
+                                    LOG_DEBUG << resp->getBody();
+                                    LOG_ERROR << "Error!";
+                                    exit(1);
+                                }
+                            }
+                            else
+                            {
+                                LOG_ERROR << "Error!";
+                                exit(1);
+                            }
+                        });
+
+    /// Test attributes
+    req = HttpRequest::newHttpRequest();
+    req->setMethod(drogon::Get);
+    req->setPath("/api/v1/apitest/attrs");
     client->sendRequest(req,
                         [=](ReqResult result, const HttpResponsePtr &resp) {
                             if (result == ReqResult::Ok)
@@ -1032,18 +1034,19 @@ int main(int argc, char *argv[])
             client->addCookie(sessionID);
 
         doTest(client, pro1);
-#ifdef OpenSSL_FOUND
-        std::promise<int> pro2;
-        auto sslClient = HttpClient::newHttpClient("127.0.0.1",
-                                                   8849,
-                                                   true,
-                                                   loop[1].getLoop());
-        if (sessionID)
-            sslClient->addCookie(sessionID);
-        doTest(sslClient, pro2, true);
-        auto f2 = pro2.get_future();
-        f2.get();
-#endif
+        if (app().supportSSL())
+        {
+            std::promise<int> pro2;
+            auto sslClient = HttpClient::newHttpClient("127.0.0.1",
+                                                       8849,
+                                                       true,
+                                                       loop[1].getLoop());
+            if (sessionID)
+                sslClient->addCookie(sessionID);
+            doTest(sslClient, pro2, true);
+            auto f2 = pro2.get_future();
+            f2.get();
+        }
         auto f1 = pro1.get_future();
         f1.get();
         // LOG_DEBUG << sslClient.use_count();

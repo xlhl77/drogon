@@ -12,24 +12,25 @@
  *
  */
 
-#include <cctype>
-#include <cstdlib>
 #include <drogon/utils/Utilities.h>
-#include <fcntl.h>
+#include <trantor/utils/Logger.h>
+#include <uuid.h>
+#include <zlib.h>
 #include <iomanip>
 #include <mutex>
 #include <sstream>
 #include <stack>
-#include <stdarg.h>
+#include <string>
+#include <thread>
+#include <algorithm>
+#include <cctype>
+#include <cstdlib>
 #include <stdio.h>
 #include <string.h>
-#include <string>
-#include <sys/stat.h>
-#include <thread>
-#include <trantor/utils/Logger.h>
 #include <unistd.h>
-#include <uuid.h>
-#include <zlib.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <stdarg.h>
 
 namespace drogon
 {
@@ -231,6 +232,32 @@ std::vector<std::string> splitString(const std::string &str,
         ret.push_back(str.substr(pos2));
     return ret;
 }
+
+std::set<std::string> splitStringToSet(const std::string &str,
+                                       const std::string &separator)
+{
+    std::set<std::string> ret;
+    std::string::size_type pos1, pos2;
+    pos2 = 0;
+    pos1 = str.find(separator);
+    while (pos1 != std::string::npos)
+    {
+        if (pos1 != 0)
+        {
+            std::string item = str.substr(pos2, pos1 - pos2);
+            ret.insert(item);
+        }
+        pos2 = pos1 + separator.length();
+        while (pos2 < str.length() &&
+               str.substr(pos2, separator.length()) == separator)
+            pos2 += separator.length();
+        pos1 = str.find(separator, pos2);
+    }
+    if (pos2 < str.length())
+        ret.insert(str.substr(pos2));
+    return ret;
+}
+
 std::string getUuid()
 {
     uuid_t uu;
@@ -286,7 +313,59 @@ std::string base64Encode(const unsigned char *bytes_to_encode,
     return ret;
 }
 
-std::string base64Decode(std::string const &encoded_string)
+std::vector<char> base64DecodeToVector(const std::string &encoded_string)
+{
+    int in_len = encoded_string.size();
+    int i = 0;
+    int in_ = 0;
+    char char_array_4[4], char_array_3[3];
+    std::vector<char> ret;
+    ret.reserve(in_len);
+
+    while (in_len-- && (encoded_string[in_] != '=') &&
+           isBase64(encoded_string[in_]))
+    {
+        char_array_4[i++] = encoded_string[in_];
+        in_++;
+        if (i == 4)
+        {
+            for (i = 0; i < 4; i++)
+                char_array_4[i] = base64Chars.find(char_array_4[i]);
+
+            char_array_3[0] =
+                (char_array_4[0] << 2) + ((char_array_4[1] & 0x30) >> 4);
+            char_array_3[1] = ((char_array_4[1] & 0xf) << 4) +
+                              ((char_array_4[2] & 0x3c) >> 2);
+            char_array_3[2] = ((char_array_4[2] & 0x3) << 6) + char_array_4[3];
+
+            for (i = 0; (i < 3); i++)
+                ret.push_back(char_array_3[i]);
+            i = 0;
+        }
+    }
+
+    if (i)
+    {
+        for (int j = i; j < 4; j++)
+            char_array_4[j] = 0;
+
+        for (int j = 0; j < 4; j++)
+            char_array_4[j] = base64Chars.find(char_array_4[j]);
+
+        char_array_3[0] =
+            (char_array_4[0] << 2) + ((char_array_4[1] & 0x30) >> 4);
+        char_array_3[1] =
+            ((char_array_4[1] & 0xf) << 4) + ((char_array_4[2] & 0x3c) >> 2);
+        char_array_3[2] = ((char_array_4[2] & 0x3) << 6) + char_array_4[3];
+
+        for (int j = 0; (j < i - 1); j++)
+            ret.push_back(char_array_3[j]);
+    }
+
+    return ret;
+}
+
+std::string base64Decode(const std::string &encoded_string)
 {
     int in_len = encoded_string.size();
     int i = 0;
@@ -351,7 +430,102 @@ static std::string charToHex(char c)
 
     return result;
 }
+std::string urlEncodeComponent(const std::string &src)
+{
+    std::string result;
+    std::string::const_iterator iter;
 
+    for (iter = src.begin(); iter != src.end(); ++iter)
+    {
+        switch (*iter)
+        {
+            case ' ':
+                result.append(1, '+');
+                break;
+            // alnum
+            case 'A':
+            case 'B':
+            case 'C':
+            case 'D':
+            case 'E':
+            case 'F':
+            case 'G':
+            case 'H':
+            case 'I':
+            case 'J':
+            case 'K':
+            case 'L':
+            case 'M':
+            case 'N':
+            case 'O':
+            case 'P':
+            case 'Q':
+            case 'R':
+            case 'S':
+            case 'T':
+            case 'U':
+            case 'V':
+            case 'W':
+            case 'X':
+            case 'Y':
+            case 'Z':
+            case 'a':
+            case 'b':
+            case 'c':
+            case 'd':
+            case 'e':
+            case 'f':
+            case 'g':
+            case 'h':
+            case 'i':
+            case 'j':
+            case 'k':
+            case 'l':
+            case 'm':
+            case 'n':
+            case 'o':
+            case 'p':
+            case 'q':
+            case 'r':
+            case 's':
+            case 't':
+            case 'u':
+            case 'v':
+            case 'w':
+            case 'x':
+            case 'y':
+            case 'z':
+            case '0':
+            case '1':
+            case '2':
+            case '3':
+            case '4':
+            case '5':
+            case '6':
+            case '7':
+            case '8':
+            case '9':
+            // mark
+            case '-':
+            case '_':
+            case '.':
+            case '!':
+            case '~':
+            case '*':
+            case '(':
+            case ')':
+                result.append(1, *iter);
+                break;
+            // escape
+            default:
+                result.append(1, '%');
+                result.append(charToHex(*iter));
+                break;
+        }
+    }
+
+    return result;
+}
 std::string urlEncode(const std::string &src)
 {
     std::string result;
@@ -454,12 +628,17 @@ std::string urlEncode(const std::string &src)
 
     return result;
 }
-
+bool needUrlDecoding(const char *begin, const char *end)
+{
+    return std::find_if(begin, end, [](const char c) {
+               return c == '+' || c == '%';
+           }) != end;
+}
 std::string urlDecode(const char *begin, const char *end)
 {
     std::string result;
     size_t len = end - begin;
-    result.reserve(len);
+    result.reserve(len * 2);
     int hex = 0;
     for (size_t i = 0; i < len; ++i)
     {
@@ -499,22 +678,9 @@ std::string urlDecode(const char *begin, const char *end)
                         x2 = x2 - 'A' + 10;
                     }
                     hex = x1 * 16 + x2;
-                    if (!((hex >= 48 && hex <= 57) ||   // 0-9
-                          (hex >= 97 && hex <= 122) ||  // a-z
-                          (hex >= 65 && hex <= 90) ||   // A-Z
-                          //[$-_.+!*'(),]  [$&+,/:;?@]
-                          hex == 0x21 || hex == 0x24 || hex == 0x26 ||
-                          hex == 0x27 || hex == 0x28 || hex == 0x29 ||
-                          hex == 0x2a || hex == 0x2b || hex == 0x2c ||
-                          hex == 0x2d || hex == 0x2e || hex == 0x2f ||
-                          hex == 0x3A || hex == 0x3B || hex == 0x3f ||
-                          hex == 0x40 || hex == 0x5f))
-                    {
-                        result += char(hex);
-                        i += 2;
-                    }
-                    else
-                        result += '%';
+
+                    result += char(hex);
+                    i += 2;
                 }
                 else
                 {
@@ -530,7 +696,7 @@ std::string urlDecode(const char *begin, const char *end)
 }
 
 /* Compress gzip data */
-std::shared_ptr<std::string> gzipCompress(const char *data, const size_t ndata)
+std::string gzipCompress(const char *data, const size_t ndata)
 {
     z_stream strm = {0};
     if (data && ndata > 0)
@@ -542,36 +708,35 @@ std::shared_ptr<std::string> gzipCompress(const char *data, const size_t ndata)
                          8,
                          Z_DEFAULT_STRATEGY) != Z_OK)
             return nullptr;
-        auto outstr = std::make_shared<std::string>();
-        outstr->resize(compressBound(ndata));
+        std::string outstr;
+        outstr.resize(compressBound(ndata));
         strm.next_in = (Bytef *)data;
         strm.avail_in = ndata;
-        strm.next_out = (Bytef *)outstr->data();
-        strm.avail_out = outstr->length();
+        strm.next_out = (Bytef *)outstr.data();
+        strm.avail_out = outstr.length();
         if (deflate(&strm, Z_FINISH) != Z_STREAM_END)
             return nullptr;
         if (deflateEnd(&strm) != Z_OK)
             return nullptr;
-        outstr->resize(strm.total_out);
+        outstr.resize(strm.total_out);
         return outstr;
     }
-    return nullptr;
+    return std::string{};
 }
 
-std::shared_ptr<std::string> gzipDecompress(
-    const std::shared_ptr<std::string> &compressedData)
+std::string gzipDecompress(const char *data, const size_t ndata)
 {
-    if (compressedData->length() == 0)
-        return compressedData;
+    if (ndata == 0)
+        return std::string(data, ndata);
 
-    auto full_length = compressedData->length();
+    auto full_length = ndata;
 
-    auto decompressed = std::make_shared<std::string>(full_length * 2, 0);
+    auto decompressed = std::string(full_length * 2, 0);
     bool done = false;
 
     z_stream strm = {0};
-    strm.next_in = (Bytef *)compressedData->data();
-    strm.avail_in = compressedData->length();
+    strm.next_in = (Bytef *)data;
+    strm.avail_in = ndata;
     strm.total_out = 0;
     strm.zalloc = Z_NULL;
     strm.zfree = Z_NULL;
@@ -580,12 +745,12 @@ std::shared_ptr<std::string> gzipDecompress(
     while (!done)
     {
         // Make sure we have enough room and reset the lengths.
-        if (strm.total_out >= decompressed->length())
+        if (strm.total_out >= decompressed.length())
         {
-            decompressed->resize(decompressed->length() * 2);
+            decompressed.resize(decompressed.length() * 2);
         }
-        strm.next_out = (Bytef *)decompressed->data() + strm.total_out;
-        strm.avail_out = decompressed->length() - strm.total_out;
+        strm.next_out = (Bytef *)decompressed.data() + strm.total_out;
+        strm.avail_out = decompressed.length() - strm.total_out;
         // Inflate another chunk.
         int status = inflate(&strm, Z_SYNC_FLUSH);
         if (status == Z_STREAM_END)
@@ -598,23 +763,23 @@ std::shared_ptr<std::string> gzipDecompress(
         }
     }
     if (inflateEnd(&strm) != Z_OK)
-        return nullptr;
+        return std::string{};
     // Set real length.
     if (done)
     {
-        decompressed->resize(strm.total_out);
+        decompressed.resize(strm.total_out);
         return decompressed;
     }
     else
     {
-        return nullptr;
+        return std::string{};
     }
 }
 
 char *getHttpFullDate(const trantor::Date &date)
 {
-    static __thread int64_t lastSecond = 0;
-    static __thread char lastTimeString[128] = {0};
+    static thread_local int64_t lastSecond = 0;
+    static thread_local char lastTimeString[128] = {0};
     auto nowSecond = date.microSecondsSinceEpoch() / MICRO_SECONDS_PRE_SEC;
     if (nowSecond == lastSecond)
     {
@@ -691,7 +856,7 @@ int createPath(const std::string &path)
             return -1;
         while (tmpPath[tmpPath.length() - 1] == '/')
             tmpPath.resize(tmpPath.length() - 1);
-        auto pos = tmpPath.rfind("/");
+        auto pos = tmpPath.rfind('/');
         if (pos != std::string::npos)
         {
             pathStack.push(tmpPath.substr(pos));

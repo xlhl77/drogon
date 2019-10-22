@@ -22,18 +22,35 @@
 #include <unistd.h>
 
 using namespace drogon;
-
-void HttpRequestImpl::parseParameters() const
+void HttpRequestImpl::parseJson() const
 {
-    auto input = queryView();
+    auto input = contentView();
     if (input.empty())
         return;
     std::string type = getHeaderBy("content-type");
     std::transform(type.begin(), type.end(), type.begin(), tolower);
-    if (_method == Get ||
-        (_method == Post &&
-         (type.empty() ||
-          type.find("application/x-www-form-urlencoded") != std::string::npos)))
+    if (type.find("application/json") != std::string::npos)
+    {
+        static std::once_flag once;
+        static Json::CharReaderBuilder builder;
+        std::call_once(once, []() { builder["collectComments"] = false; });
+        _jsonPtr = std::make_shared<Json::Value>();
+        JSONCPP_STRING errs;
+        std::unique_ptr<Json::CharReader> reader(builder.newCharReader());
+        if (!reader->parse(input.data(),
+                           input.data() + input.size(),
+                           _jsonPtr.get(),
+                           &errs))
+        {
+            LOG_ERROR << errs;
+            _jsonPtr.reset();
+        }
+    }
+}
+void HttpRequestImpl::parseParameters() const
+{
+    auto input = queryView();
+    if (!input.empty())
     {
         string_view::size_type pos = 0;
         while ((input[pos] == '?' || isspace(input[pos])) &&
@@ -42,10 +59,10 @@ void HttpRequestImpl::parseParameters() const
             pos++;
         }
         auto value = input.substr(pos);
-        while ((pos = value.find("&")) != string_view::npos)
+        while ((pos = value.find('&')) != string_view::npos)
         {
             auto coo = value.substr(0, pos);
-            auto epos = coo.find("=");
+            auto epos = coo.find('=');
             if (epos != string_view::npos)
             {
                 auto key = coo.substr(0, epos);
@@ -63,7 +80,7 @@ void HttpRequestImpl::parseParameters() const
         if (value.length() > 0)
         {
             auto &coo = value;
-            auto epos = coo.find("=");
+            auto epos = coo.find('=');
             if (epos != string_view::npos)
             {
                 auto key = coo.substr(0, epos);
@@ -78,28 +95,58 @@ void HttpRequestImpl::parseParameters() const
             }
         }
     }
-    if (type.find("application/json") != std::string::npos)
+
+    input = contentView();
+    if (input.empty())
+        return;
+    std::string type = getHeaderBy("content-type");
+    std::transform(type.begin(), type.end(), type.begin(), tolower);
+    if (type.empty() ||
+        type.find("application/x-www-form-urlencoded") != std::string::npos)
     {
-        // parse json data in request
-        _jsonPtr = std::make_shared<Json::Value>();
-        Json::CharReaderBuilder builder;
-        builder["collectComments"] = false;
-        JSONCPP_STRING errs;
-        std::unique_ptr<Json::CharReader> reader(builder.newCharReader());
-        if (!reader->parse(input.data(),
-                           input.data() + input.size(),
-                           _jsonPtr.get(),
-                           &errs))
+        string_view::size_type pos = 0;
+        while ((input[pos] == '?' || isspace(input[pos])) &&
+               pos < input.length())
         {
-            LOG_ERROR << errs;
-            _jsonPtr.reset();
+            pos++;
+        }
+        auto value = input.substr(pos);
+        while ((pos = value.find('&')) != string_view::npos)
+        {
+            auto coo = value.substr(0, pos);
+            auto epos = coo.find('=');
+            if (epos != string_view::npos)
+            {
+                auto key = coo.substr(0, epos);
+                string_view::size_type cpos = 0;
+                while (cpos < key.length() && isspace(key[cpos]))
+                    cpos++;
+                key = key.substr(cpos);
+                auto pvalue = coo.substr(epos + 1);
+                std::string pdecode = utils::urlDecode(pvalue);
+                std::string keydecode = utils::urlDecode(key);
+                _parameters[keydecode] = pdecode;
+            }
+            value = value.substr(pos + 1);
+        }
+        if (value.length() > 0)
+        {
+            auto &coo = value;
+            auto epos = coo.find('=');
+            if (epos != string_view::npos)
+            {
+                auto key = coo.substr(0, epos);
+                string_view::size_type cpos = 0;
+                while (cpos < key.length() && isspace(key[cpos]))
+                    cpos++;
+                key = key.substr(cpos);
+                auto pvalue = coo.substr(epos + 1);
+                std::string pdecode = utils::urlDecode(pvalue);
+                std::string keydecode = utils::urlDecode(key);
+                _parameters[keydecode] = pdecode;
+            }
         }
     }
-    // LOG_TRACE << "_parameters:";
-    // for (auto iter : _parameters)
-    // {
-    //     LOG_TRACE << iter.first << "=" << iter.second;
-    // }
 }
 
 void HttpRequestImpl::appendToBuffer(trantor::MsgBuffer *output) const
@@ -142,13 +189,12 @@ void HttpRequestImpl::appendToBuffer(trantor::MsgBuffer *output) const
     {
         for (auto const &p : _parameters)
         {
-            content.append(p.first);
+            content.append(utils::urlEncodeComponent(p.first));
             content.append("=");
-            content.append(p.second);
+            content.append(utils::urlEncodeComponent(p.second));
             content.append("&");
         }
         content.resize(content.length() - 1);
-        content = utils::urlEncode(content);
         if (_method == Get || _method == Delete || _method == Head)
         {
             auto ret = std::find(output->peek(),
@@ -309,15 +355,14 @@ void HttpRequestImpl::addHeader(const char *start,
     {
         value.resize(value.size() - 1);
     }
-
-    if (field == "cookie")
+    if (field.length() == 6 && field == "cookie")
     {
         LOG_TRACE << "cookies!!!:" << value;
         std::string::size_type pos;
-        while ((pos = value.find(";")) != std::string::npos)
+        while ((pos = value.find(';')) != std::string::npos)
         {
             std::string coo = value.substr(0, pos);
-            auto epos = coo.find("=");
+            auto epos = coo.find('=');
             if (epos != std::string::npos)
             {
                 std::string cookie_name = coo.substr(0, epos);
@@ -334,7 +379,7 @@ void HttpRequestImpl::addHeader(const char *start,
         if (value.length() > 0)
         {
             std::string &coo = value;
-            auto epos = coo.find("=");
+            auto epos = coo.find('=');
             if (epos != std::string::npos)
             {
                 std::string cookie_name = coo.substr(0, epos);
@@ -350,7 +395,40 @@ void HttpRequestImpl::addHeader(const char *start,
     }
     else
     {
-        //_headers[std::move(field)] = std::move(value);
+        switch (field.length())
+        {
+            case 6:
+                if (field == "expect")
+                {
+                    _expect = value;
+                }
+                break;
+            case 10:
+            {
+                if (field == "connection")
+                {
+                    if (_version == kHttp11)
+                    {
+                        if (value.length() == 5 && value == "close")
+                            _keepAlive = false;
+                    }
+                    else if (value.length() == 10 &&
+                             (value == "Keep-Alive" || value == "keep-alive"))
+                    {
+                        _keepAlive = true;
+                    }
+                }
+            }
+            break;
+            case 14:
+                if (field == "content-length")
+                {
+                    _contentLen = std::stoull(value.c_str());
+                }
+                break;
+            default:
+                break;
+        }
         _headers.emplace(std::move(field), std::move(value));
     }
 }

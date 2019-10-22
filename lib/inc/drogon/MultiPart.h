@@ -54,29 +54,49 @@ class HttpFile
 
     /// Save the file to @param path
     /**
-     * If the @param path is prefixed with "/", "./" or "../", or the @param
-     * path is "." or "..", the full path is @param
-     * path+"/"+this->getFileName(), otherwise the file is saved as
-     * app().getUploadPath()+"/"+@param path+"/"+this->getFileName()
+     * @param path if the parameter is prefixed with "/", "./" or "../", or is
+     * "." or "..", the full path is path+"/"+this->getFileName(),
+     * otherwise the file is saved as
+     * app().getUploadPath()+"/"+path+"/"+this->getFileName()
      */
     int save(const std::string &path) const;
 
     /// Save the file to file system with a new name
     /**
-     * If the @param filename isn't prefixed with "/", "./" or "../", the full
-     * path is app().getUploadPath()+"/"+@param filename, otherwise the file is
-     * saved as @param filename
+     * @param filename if the parameter isn't prefixed with "/", "./" or "../",
+     * the full path is app().getUploadPath()+"/"+filename, otherwise the file
+     * is saved as the filename
      */
     int saveAs(const std::string &filename) const;
 
     /// Return the file length.
-    int64_t fileLength() const
+    int64_t fileLength() const noexcept
     {
         return _fileContent.length();
     };
-
+    /// Return the file content.
+    char *fileData() noexcept
+    {
+#if __cplusplus >= 201703L
+        return _fileContent.data();
+#else
+        return (char *)(_fileContent.data());
+#endif
+    }
+    const char *fileData() const noexcept
+    {
+        return _fileContent.data();
+    }
+    std::string &fileContent() noexcept
+    {
+        return _fileContent;
+    }
+    const std::string &fileContent() const noexcept
+    {
+        return _fileContent;
+    }
     /// Return the md5 string of the file
-    const std::string getMd5() const;
+    std::string getMd5() const;
 
   protected:
     int saveTo(const std::string &pathAndFilename) const;
@@ -101,9 +121,6 @@ class MultiPartParser
 
     /// Parse the http request stream to get files and parameters.
     int parse(const HttpRequestPtr &req);
-
-    /// Parse the http response stream to get files and parameters.
-    /// int parse(const HttpResponsePtr &req);
 
   protected:
     std::vector<HttpFile> _files;

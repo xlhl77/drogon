@@ -14,6 +14,7 @@
 #pragma once
 
 #include <drogon/utils/string_view.h>
+#include <drogon/DrClassMap.h>
 #include <drogon/Cookie.h>
 #include <drogon/HttpTypes.h>
 #include <drogon/HttpViewData.h>
@@ -26,12 +27,73 @@ namespace drogon
 /// Abstract class for webapp developer to get or set the Http response;
 class HttpResponse;
 typedef std::shared_ptr<HttpResponse> HttpResponsePtr;
+
+/**
+ * @brief This template is used to convert a response object to a custom
+ * type object. Users must specialize the template for a particular type.
+ */
+template <typename T>
+T fromResponse(const HttpResponse &resp)
+{
+    LOG_ERROR
+        << "You must specialize the fromResponse template for the type of "
+        << DrClassMap::demangle(typeid(T).name());
+    exit(1);
+}
+
+/**
+ * @brief This template is used to create a response object from a custom
+ * type object by calling the newCustomHttpResponse(). Users must specialize
+ * the template for a particular type.
+ */
+template <typename T>
+HttpResponsePtr toResponse(T &&)
+{
+    LOG_ERROR << "You must specialize the toResponse template for the type of "
+              << DrClassMap::demangle(typeid(T).name());
+    exit(1);
+}
+template <>
+HttpResponsePtr toResponse(const Json::Value &pJson);
+template <>
+HttpResponsePtr toResponse(Json::Value &&pJson);
+template <>
+inline HttpResponsePtr toResponse(Json::Value &pJson)
+{
+    return toResponse((const Json::Value &)pJson);
+}
+
 class HttpResponse
 {
   public:
-    HttpResponse()
+    /**
+     * @brief This template enables automatic type conversion. For using this
+     * template, user must specialize the fromResponse template. For example a
+     * shared_ptr<Json::Value> specialization version is available above, so
+     * we can use the following code to get a json object:
+     * @code
+     *  std::shared_ptr<Json::Value> jsonPtr = *responsePtr;
+     *  @endcode
+     * With this template, user can use their favorite JSON library instead of
+     * the default jsoncpp library or convert the response to an object of any
+     * custom type.
+     */
+    template <typename T>
+    operator T() const
     {
+        return fromResponse<T>(*this);
     }
+
+    /**
+     * @brief This template enables explicit type conversion, see the above
+     * template.
+     */
+    template <typename T>
+    T as() const
+    {
+        return fromResponse<T>(*this);
+    }
+
     /// Get the status code such as 200, 404
     virtual HttpStatusCode statusCode() const = 0;
     HttpStatusCode getStatusCode() const
@@ -52,11 +114,13 @@ class HttpResponse
     /// Set the http version, http1.0 or http1.1
     virtual void setVersion(const Version v) = 0;
 
-    /// If @param on is false, the connection keeps alive on the condition that
-    /// the client request has a
-    //  'keep-alive' head, otherwise it is closed immediately after sending the
-    //  last byte of the response.
-    //  It's false by default when the response is created.
+    /// Set if close the connection after the request is sent.
+    /**
+     * @param on if the parameter is false, the connection keeps alive on the
+     * condition that the client request has a 'keep-alive' head, otherwise it
+     * is closed immediately after sending the last byte of the response. It's
+     * false by default when the response is created.
+     */
     virtual void setCloseConnection(bool on) = 0;
 
     /// Get the status set by the setCloseConnetion() method.
@@ -99,23 +163,26 @@ class HttpResponse
         return contentType();
     }
 
-    /// Get the header string identified by the @param key.
-    /// If there is no the header, the @param defaultVal is retured.
-    /// The @param key is case insensitive
-    virtual const std::string &getHeader(
-        const std::string &key,
-        const std::string &defaultVal = std::string()) const = 0;
-    virtual const std::string &getHeader(
-        std::string &&key,
-        const std::string &defaultVal = std::string()) const = 0;
+    /// Get the header string identified by the key parameter.
+    /**
+     * @note
+     * If there is no the header, a empty string is retured.
+     * The key is case insensitive
+     */
+    virtual const std::string &getHeader(const std::string &key) const = 0;
+    virtual const std::string &getHeader(std::string &&key) const = 0;
 
-    /// Remove the header identified by the @param key.
+    /// Remove the header identified by the key parameter.
     virtual void removeHeader(const std::string &key) = 0;
+
+    /// Remove the header identified by the key parameter.
     virtual void removeHeader(std::string &&key) = 0;
 
     /// Get all headers of the response
     virtual const std::unordered_map<std::string, std::string> &headers()
         const = 0;
+
+    /// Get all headers of the response
     const std::unordered_map<std::string, std::string> &getHeaders() const
     {
         return headers();
@@ -124,41 +191,63 @@ class HttpResponse
     /// Add a header.
     virtual void addHeader(const std::string &key,
                            const std::string &value) = 0;
+
+    /// Add a header.
     virtual void addHeader(const std::string &key, std::string &&value) = 0;
 
     /// Add a cookie
     virtual void addCookie(const std::string &key,
                            const std::string &value) = 0;
+
+    /// Add a cookie
     virtual void addCookie(const Cookie &cookie) = 0;
 
-    /// Get the cookie identified by the @param key. If there is no the cookie,
-    /// If there is no the cookie, the @param defaultCookie is retured.
-    virtual const Cookie &getCookie(
-        const std::string &key,
-        const Cookie &defaultCookie = Cookie{}) const = 0;
+    /// Get the cookie identified by the key parameter.
+    /// If there is no the cookie, the empty cookie is retured.
+    virtual const Cookie &getCookie(const std::string &key) const = 0;
 
     /// Get all cookies.
     virtual const std::unordered_map<std::string, Cookie> &cookies() const = 0;
+
+    /// Get all cookies.
     const std::unordered_map<std::string, Cookie> &getCookies() const
     {
         return cookies();
     }
 
-    /// Remove the cookie identified by the @param key.
+    /// Remove the cookie identified by the key parameter.
     virtual void removeCookie(const std::string &key) = 0;
 
-    /// Set the response body(content). The @param body must match the content
-    /// type
+    /// Set the response body(content).
+    /**
+     * @note The body must match the content type
+     */
     virtual void setBody(const std::string &body) = 0;
+
+    /// Set the response body(content).
     virtual void setBody(std::string &&body) = 0;
+
+    /// Set the response body(content).
+    template <int N>
+    void setBody(const char (&body)[N])
+    {
+        assert(strnlen(body, N) == N - 1);
+        setBody(body, N - 1);
+    }
 
     /// Get the response body.
     virtual const std::string &body() const = 0;
+
+    /// Get the response body.
     const std::string &getBody() const
     {
         return body();
     }
+
+    /// Get the response body.
     virtual std::string &body() = 0;
+
+    /// Get the response body.
     std::string &getBody()
     {
         return body();
@@ -188,8 +277,8 @@ class HttpResponse
         return jsonObject();
     }
 
-    /// The following methods are a series of factory methods that help users
-    /// create response objects.
+    /* The following methods are a series of factory methods that help users
+     * create response objects. */
 
     /// Create a normal response with a status code of 200ok and a content type
     /// of text/html.
@@ -199,32 +288,67 @@ class HttpResponse
     /// Create a response which returns a json object. Its content type is set
     /// to set/json.
     static HttpResponsePtr newHttpJsonResponse(const Json::Value &data);
-    /// Create a response that returns a page rendered by a view named @param
+    static HttpResponsePtr newHttpJsonResponse(Json::Value &&data);
+    /// Create a response that returns a page rendered by a view named
     /// viewName.
-    /// @param data is the data displayed on the page.
-    /// For more details, see the wiki pages, the "View" section.
+    /**
+     * @param viewName The name of the view
+     * @param data is the data displayed on the page.
+     * @note For more details, see the wiki pages, the "View" section.
+     */
     static HttpResponsePtr newHttpViewResponse(
         const std::string &viewName,
         const HttpViewData &data = HttpViewData());
+
     /// Create a response that returns a 302 Found page, redirecting to another
-    /// page located in the @param location.
+    /// page located in the location parameter.
     static HttpResponsePtr newRedirectionResponse(const std::string &location);
+
     /// Create a response that returns a file to the client.
     /**
      * @param fullPath is the full path to the file.
-     * If @param attachmentFileName is not empty, the browser does not open the
-     * file, but saves it as an attachment.
-     * If the @param type is CT_NONE, the content type is set by drogon based on
-     * the file extension.
+     * @param attachmentFileName if the parameter is not empty, the browser
+     * does not open the file, but saves it as an attachment.
+     * @param type if the parameter is CT_NONE, the content type is set by
+     * drogon based on the file extension.
      */
     static HttpResponsePtr newFileResponse(
         const std::string &fullPath,
         const std::string &attachmentFileName = "",
         ContentType type = CT_NONE);
 
+    /**
+     * @brief Create a custom HTTP response object. For using this template,
+     * users must specialize the toResponse template.
+     */
+    template <typename T>
+    static HttpResponsePtr newCustomHttpResponse(T &&obj)
+    {
+        return toResponse(std::forward<T>(obj));
+    }
+
     virtual ~HttpResponse()
     {
     }
-};
 
+  private:
+    virtual void setBody(const char *body, size_t len) = 0;
+};
+template <>
+inline HttpResponsePtr toResponse(const Json::Value &pJson)
+{
+    return HttpResponse::newHttpJsonResponse(pJson);
+}
+
+template <>
+inline HttpResponsePtr toResponse(Json::Value &&pJson)
+{
+    return HttpResponse::newHttpJsonResponse(std::move(pJson));
+}
+
+template <>
+inline std::shared_ptr<Json::Value> fromResponse(const HttpResponse &resp)
+{
+    return resp.getJsonObject();
+}
 }  // namespace drogon

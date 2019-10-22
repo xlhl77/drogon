@@ -29,5 +29,13 @@
 #include <drogon/plugins/Plugin.h>
 #include <drogon/Cookie.h>
 #include <drogon/Session.h>
+#include <drogon/IOThreadStorage.h>
 #include <drogon/UploadFile.h>
 #include <drogon/orm/DbClient.h>
+
+/**
+ * @mainpage
+ * ### Overview
+ * Drogon is a C++14/17-based HTTP application framework. Drogon can be used to
+ * easily build various types of web application server programs using C++.
+ */

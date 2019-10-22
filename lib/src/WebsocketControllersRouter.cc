@@ -36,13 +36,14 @@ void WebsocketControllersRouter::registerWebSocketController(
     assert(!ctrlName.empty());
     std::string path(pathName);
     std::transform(pathName.begin(), pathName.end(), path.begin(), tolower);
-    auto objPtr = DrClassMap::getSingleInstance(ctrlName);
-    auto ctrlPtr = std::dynamic_pointer_cast<WebSocketControllerBase>(objPtr);
-    assert(ctrlPtr);
-    std::lock_guard<std::mutex> guard(_websockCtrlMutex);
-
-    _websockCtrlMap[path]._controller = ctrlPtr;
-    _websockCtrlMap[path]._filterNames = filters;
+    drogon::app().getLoop()->queueInLoop([=]() {
+        auto objPtr = DrClassMap::getSingleInstance(ctrlName);
+        auto ctrlPtr =
+            std::dynamic_pointer_cast<WebSocketControllerBase>(objPtr);
+        assert(ctrlPtr);
+        _websockCtrlMap[path]._controller = ctrlPtr;
+        _websockCtrlMap[path]._filterNames = filters;
+    });
 }
 
 void WebsocketControllersRouter::route(
@@ -72,19 +73,14 @@ void WebsocketControllersRouter::route(
                     auto callbackPtr = std::make_shared<
                         std::function<void(const HttpResponsePtr &)>>(
                         std::move(callback));
-                    filters_function::doFilters(filters,
+                    filters_function::doFilters(
+                        filters, req, callbackPtr, [=]() mutable {
+                            doControllerHandler(ctrlPtr,
+                                                wsKey,
                                                 req,
-                                                callbackPtr,
-                                                false,
-                                                nullptr,
-                                                [=]() mutable {
-                                                    doControllerHandler(
-                                                        ctrlPtr,
-                                                        wsKey,
-                                                        req,
-                                                        std::move(*callbackPtr),
-                                                        wsConnPtr);
-                                                });
+                                                std::move(*callbackPtr),
+                                                wsConnPtr);
+                        });
                 }
                 else
                 {

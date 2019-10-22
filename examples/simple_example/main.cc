@@ -1,7 +1,6 @@
 
 #include "CustomCtrl.h"
 #include "CustomHeaderFilter.h"
-#include <drogon/config.h>
 #include <drogon/drogon.h>
 #include <vector>
 #include <string>
@@ -21,7 +20,7 @@ class A : public DrObjectBase
     {
         HttpViewData data;
         data.insert("title", std::string("ApiTest::get"));
-        std::map<std::string, std::string> para;
+        std::unordered_map<std::string, std::string> para;
         para["int p1"] = std::to_string(p1);
         para["string p2"] = p2;
         para["string p3"] = p3;
@@ -41,7 +40,7 @@ class A : public DrObjectBase
     {
         HttpViewData data;
         data.insert("title", std::string("ApiTest::get"));
-        std::map<std::string, std::string> para;
+        std::unordered_map<std::string, std::string> para;
         para["int p1"] = std::to_string(p1);
         para["string p2"] = p2;
         para["string p3"] = p3;
@@ -62,7 +61,7 @@ class B : public DrObjectBase
     {
         HttpViewData data;
         data.insert("title", std::string("ApiTest::get"));
-        std::map<std::string, std::string> para;
+        std::unordered_map<std::string, std::string> para;
         para["p1"] = std::to_string(p1);
         para["p2"] = std::to_string(p2);
         data.insert("parameters", para);
@@ -92,7 +91,7 @@ class Test : public HttpController<Test>
     {
         HttpViewData data;
         data.insert("title", std::string("ApiTest::get"));
-        std::map<std::string, std::string> para;
+        std::unordered_map<std::string, std::string> para;
         para["p1"] = std::to_string(p1);
         para["p2"] = std::to_string(p2);
         data.insert("parameters", para);
@@ -106,7 +105,7 @@ class Test : public HttpController<Test>
     {
         HttpViewData data;
         data.insert("title", std::string("ApiTest::get"));
-        std::map<std::string, std::string> para;
+        std::unordered_map<std::string, std::string> para;
         para["p1"] = std::to_string(p1);
         para["p2"] = std::to_string(p2);
         data.insert("parameters", para);
@@ -120,37 +119,59 @@ class Test : public HttpController<Test>
 using namespace std::placeholders;
 using namespace drogon;
 
-/// Some examples in the main function some common functions of drogon. In
+namespace drogon
+{
+template <>
+string_view fromRequest(const HttpRequest &req)
+{
+    return req.body();
+}
+}  // namespace drogon
+
+/// Some examples in the main function show some common functions of drogon. In
 /// practice, we don't need such a lengthy main function.
 int main()
 {
     std::cout << banner << std::endl;
     // app().addListener("::1", 8848); //ipv6
     app().addListener("0.0.0.0", 8848);
-#ifdef OpenSSL_FOUND
     // https
-    drogon::app().setSSLFiles("server.pem", "server.pem");
-    drogon::app().addListener("0.0.0.0", 8849, true);
-#endif
+    if (app().supportSSL())
+    {
+        drogon::app()
+            .setSSLFiles("server.pem", "server.pem")
+            .addListener("0.0.0.0", 8849, true);
+    }
     // Class function example
-    app().registerHandler("/api/v1/handle1/{1}/{2}/?p3={3}&p4={4}", &A::handle);
-    app().registerHandler("/api/v1/handle11/{1}/{2}/?p3={3}&p4={4}",
-                          &A::staticHandle);
+    app().registerHandler("/api/v1/handle1/{}/{}/?p3={}&p4={}", &A::handle);
+    app().registerHandler(
+        "/api/v1/handle11/{int p1}/{string p2}/?p3={string p3}&p4={int p4}",
+        &A::staticHandle);
     // Lambda example
     app().registerHandler(
-        "/api/v1/handle2/{1}/{2}",
+        "/api/v1/handle2/{int a}/{float b}",
         [](const HttpRequestPtr &req,
            std::function<void(const HttpResponsePtr &)> &&callback,
-           int a,
-           float b) {
+           int a,    // here the `a` parameter is converted from the number 1
+                     // parameter in the path.
+           float b,  // here the `b` parameter is converted from the number 2
+                     // parameter in the path.
+           string_view &&body,  // here the `body` parameter is converted from
+                                // req->as<string_view>();
+           const std::shared_ptr<Json::Value>
+               &jsonPtr  // here the `jsonPtr` parameter is converted from
+                         // req->as<std::shared_ptr<Json::Value>>();
+        ) {
             HttpViewData data;
             data.insert("title", std::string("ApiTest::get"));
-            std::map<std::string, std::string> para;
+            std::unordered_map<std::string, std::string> para;
             para["a"] = std::to_string(a);
             para["b"] = std::to_string(b);
             data.insert("parameters", para);
             auto res = HttpResponse::newHttpViewResponse("ListParaView", data);
             callback(res);
+            LOG_DEBUG << body.data();
+            assert(!jsonPtr);
         });
 
     // Functor example
@@ -166,7 +187,7 @@ int main()
                        const std::string &,
                        int)>
         func = std::bind(&A::handle, &tmp, _1, _2, _3, _4, _5, _6);
-    app().registerHandler("/api/v1/handle4/{4}/{3}/{1}", func);
+    app().registerHandler("/api/v1/handle4/{4:p4}/{3:p3}/{1:p1}", func);
 
     app().setDocumentRoot("./");
     app().enableSession(60);
@@ -235,7 +256,18 @@ int main()
     app().registerPreHandlingAdvice([](const drogon::HttpRequestPtr &req) {
         LOG_DEBUG << "preHanding observer";
     });
-
+    app().registerSyncAdvice([](const HttpRequestPtr &req) -> HttpResponsePtr {
+        static const HttpResponsePtr nullResp;
+        if (req->path() == "/plaintext")
+        {
+            auto resp = HttpResponse::newHttpResponse();
+            resp->setBody("Hello, World!");
+            resp->setContentTypeCodeAndCustomString(
+                CT_TEXT_PLAIN, "Content-Type: text/plain\r\n");
+            return resp;
+        }
+        return nullResp;
+    });
     // Output information of all handlers
     auto handlerInfo = app().getHandlersInfo();
     for (auto &info : handlerInfo)
@@ -266,6 +298,8 @@ int main()
         }
         std::cout << std::get<2>(info) << std::endl;
     }
-
+    auto resp = HttpResponse::newFileResponse("index.html");
+    resp->setExpiredTime(0);
+    app().setCustom404Page(resp);
     app().run();
 }

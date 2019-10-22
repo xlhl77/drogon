@@ -160,6 +160,7 @@ void DbClientImpl::execSql(
     assert(paraNum == format.size());
     assert(rcb);
     DbConnectionPtr conn;
+    bool busy = false;
     {
         std::lock_guard<std::mutex> guard(_connectionsMutex);
 
@@ -176,6 +177,24 @@ void DbClientImpl::execSql(
                     exceptCallback(std::current_exception());
                 }
                 return;
+            }
+            if (_sqlCmdBuffer.size() > 200000)
+            {
+                // too many queries in buffer;
+                busy = true;
+            }
+            else
+            {
+                // LOG_TRACE << "Push query to buffer";
+                std::shared_ptr<SqlCmd> cmd =
+                    std::make_shared<SqlCmd>(std::move(sql),
+                                             paraNum,
+                                             std::move(parameters),
+                                             std::move(length),
+                                             std::move(format),
+                                             std::move(rcb),
+                                             std::move(exceptCallback));
+                _sqlCmdBuffer.push_back(std::move(cmd));
             }
         }
         else
@@ -198,15 +217,6 @@ void DbClientImpl::execSql(
                 std::move(rcb),
                 std::move(exceptCallback));
         return;
-    }
-    bool busy = false;
-    {
-        std::lock_guard<std::mutex> guard(_bufferMutex);
-        if (_sqlCmdBuffer.size() > 200000)
-        {
-            // too many queries in buffer;
-            busy = true;
-        }
     }
     if (busy)
     {
@@ -248,17 +258,16 @@ void DbClientImpl::newTransactionAsync(
             conn = *iter;
             _readyConnections.erase(iter);
         }
+        else
+        {
+            _transCallbacks.push(callback);
+        }
     }
     if (conn)
     {
         makeTrans(conn,
                   std::function<void(const std::shared_ptr<Transaction> &)>(
                       callback));
-    }
-    else
-    {
-        std::lock_guard<std::mutex> lock(_transMutex);
-        _transCallbacks.push(callback);
     }
 }
 void DbClientImpl::makeTrans(
@@ -323,28 +332,30 @@ std::shared_ptr<Transaction> DbClientImpl::newTransaction(
 void DbClientImpl::handleNewTask(const DbConnectionPtr &connPtr)
 {
     std::function<void(const std::shared_ptr<Transaction> &)> transCallback;
+    std::shared_ptr<SqlCmd> cmd;
     {
-        std::lock_guard<std::mutex> guard(_transMutex);
+        std::lock_guard<std::mutex> guard(_connectionsMutex);
         if (!_transCallbacks.empty())
         {
             transCallback = std::move(_transCallbacks.front());
             _transCallbacks.pop();
+        }
+        else if (!_sqlCmdBuffer.empty())
+        {
+            cmd = std::move(_sqlCmdBuffer.front());
+            _sqlCmdBuffer.pop_front();
+        }
+        else
+        {
+            // Connection is idle, put it into the _readyConnections set;
+            _busyConnections.erase(connPtr);
+            _readyConnections.insert(connPtr);
         }
     }
     if (transCallback)
     {
         makeTrans(connPtr, std::move(transCallback));
         return;
-    }
-    // Then check if there are some sql queries in the buffer
-    std::shared_ptr<SqlCmd> cmd;
-    {
-        std::lock_guard<std::mutex> guard(_bufferMutex);
-        if (!_sqlCmdBuffer.empty())
-        {
-            cmd = std::move(_sqlCmdBuffer.front());
-            _sqlCmdBuffer.pop_front();
-        }
     }
     if (cmd)
     {
@@ -358,12 +369,6 @@ void DbClientImpl::handleNewTask(const DbConnectionPtr &connPtr)
                 std::move(cmd->_cb),
                 std::move(cmd->_exceptCb));
         return;
-    }
-    // Connection is idle, put it into the _readyConnections set;
-    {
-        std::lock_guard<std::mutex> guard(_connectionsMutex);
-        _busyConnections.erase(connPtr);
-        _readyConnections.insert(connPtr);
     }
 }
 

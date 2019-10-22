@@ -41,87 +41,593 @@ struct Traits<T, false>
 {
     typedef int type;
 };
+template <typename T>
+struct has_sqlForFindingByPrimaryKey
+{
+  private:
+    typedef std::true_type yes;
+    typedef std::false_type no;
+
+    template <typename U>
+    static auto test(int) -> decltype(U::sqlForFindingByPrimaryKey(), yes());
+
+    template <typename>
+    static no test(...);
+
+  public:
+    static constexpr bool value =
+        std::is_same<decltype(test<T>(0)), yes>::value;
+};
+template <typename T>
+struct has_sqlForDeletingByPrimaryKey
+{
+  private:
+    typedef std::true_type yes;
+    typedef std::false_type no;
+
+    template <typename U>
+    static auto test(int)
+        -> decltype(U::sqlForDeletingByPrimaryKey().length(), yes());
+
+    template <typename>
+    static no test(...);
+
+  public:
+    static constexpr bool value =
+        std::is_same<decltype(test<T>(0)), yes>::value;
+};
 }  // namespace internal
 
+/**
+ * @brief The mapper template
+ *
+ * @tparam T The type of the model to be mapped.
+ *
+ * @details The mapping between the model object and the database table is
+ * performed by the Mapper class template. The Mapper class template
+ * encapsulates common operations such as adding, deleting, and changing, so
+ * that the user can perform the above operations without writing a SQL
+ * statement.
+ *
+ * The construction of the Mapper object is very simple. The template
+ * parameter is the type of the model you want to access. The constructor has
+ * only one parameter, which is the DbClient smart pointer mentioned earlier. As
+ * mentioned earlier, the Transaction class is a subclass of DbClient, so you
+ * can also construct a Mapper object with a smart pointer to a transaction,
+ * which means that the Mapper mapping also supports transactions.
+ *
+ * Like DbClient, Mapper also provides asynchronous and synchronous interfaces.
+ * The synchronous interface is blocked and may throw an exception. The returned
+ * future object is blocked in the get() method and may throw an exception. The
+ * normal asynchronous interface does not throw an exception, but returns the
+ * result through two callbacks (result callback and exception callback). The
+ * type of the exception callback is the same as that in the DbClient interface.
+ * The result callback is also divided into several categories according to the
+ * interface function.
+ */
 template <typename T>
 class Mapper
 {
   public:
+    /**
+     * @brief Construct a new Mapper object
+     *
+     * @param client The smart pointer to the database client object.
+     */
+    Mapper(const DbClientPtr &client) : _client(client)
+    {
+    }
+
+    /**
+     * @brief Add a limit to the query.
+     *
+     * @param limit The limit
+     * @return Mapper<T>& The Mapper itself.
+     */
     Mapper<T> &limit(size_t limit);
+
+    /**
+     * @brief Add a offset to the query.
+     *
+     * @param offset The offset.
+     * @return Mapper<T>& The Mapper itself.
+     */
     Mapper<T> &offset(size_t offset);
+
+    /**
+     * @brief Set the order of the results.
+     *
+     * @param colName the column name, the results are sorted by that column
+     * @param order Ascending or descending order
+     * @return Mapper<T>& The Mapper itself.
+     */
     Mapper<T> &orderBy(const std::string &colName,
                        const SortOrder &order = SortOrder::ASC);
+
+    /**
+     * @brief Set the order of the results.
+     *
+     * @param colIndex the column index, the results are sorted by that column
+     * @param order Ascending or descending order
+     * @return Mapper<T>& The Mapper itself.
+     */
     Mapper<T> &orderBy(size_t colIndex,
                        const SortOrder &order = SortOrder::ASC);
+
+    /**
+     * @brief Lock the result for updating.
+     *
+     * @return Mapper<T>& The Mapper itself.
+     */
     Mapper<T> &forUpdate();
 
     typedef std::function<void(T)> SingleRowCallback;
     typedef std::function<void(std::vector<T>)> MultipleRowsCallback;
     typedef std::function<void(const size_t)> CountCallback;
 
-    Mapper(const DbClientPtr &client) : _client(client)
-    {
-    }
-
     typedef typename internal::
         Traits<T, !std::is_same<typename T::PrimaryKeyType, void>::value>::type
             TraitsPKType;
 
-    T findByPrimaryKey(const TraitsPKType &key) noexcept(false);
+    /**
+     * @brief Find a record by the primary key.
+     *
+     * @param key The value of the primary key.
+     * @return T The record of the primary key.
+     * @note If no hit record exists, an UnexpectedRows exception is thrown.
+     */
 
-    void findByPrimaryKey(const TraitsPKType &key,
-                          const SingleRowCallback &rcb,
-                          const ExceptionCallback &ecb) noexcept;
+    template <typename U = T>
+    inline typename std::enable_if<
+        !std::is_same<typename U::PrimaryKeyType, void>::value,
+        T>::type
+    findByPrimaryKey(const TraitsPKType &key) noexcept(false)
+    {
+        static_assert(!std::is_same<typename T::PrimaryKeyType, void>::value,
+                      "No primary key in the table!");
+        static_assert(
+            internal::has_sqlForFindingByPrimaryKey<T>::value,
+            "No function member named sqlForFindingByPrimaryKey, please "
+            "make sure that the model class is generated by the latest "
+            "version of drogon_ctl");
+        // return findOne(Criteria(T::primaryKeyName, key));
+        std::string sql = T::sqlForFindingByPrimaryKey();
+        if (_forUpdate)
+        {
+            sql += " for update";
+        }
+        clear();
+        Result r(nullptr);
+        {
+            auto binder = *_client << std::move(sql);
+            outputPrimeryKeyToBinder(key, binder);
+            binder << Mode::Blocking;
+            binder >> [&r](const Result &result) { r = result; };
+            binder.exec();  // exec may be throw exception;
+        }
+        if (r.size() == 0)
+        {
+            throw UnexpectedRows("0 rows found");
+        }
+        else if (r.size() > 1)
+        {
+            throw UnexpectedRows("Found more than one row");
+        }
+        auto row = r[0];
+        return T(row);
+    }
 
-    std::future<T> findFutureByPrimaryKey(const TraitsPKType &key) noexcept;
+    template <typename U = T>
+    inline typename std::enable_if<
+        std::is_same<typename U::PrimaryKeyType, void>::value,
+        T>::type
+    findByPrimaryKey(const TraitsPKType &key) noexcept(false)
+    {
+        LOG_FATAL << "The table must have a primary key";
+        abort();
+    }
 
+    /**
+     * @brief Asynchronously find a record by the primary key.
+     *
+     * @param key The value of the primary key.
+     * @param rcb Is called when a record is found.
+     * @param ecb Is called when an error occurs or a record cannot be found.
+     */
+    template <typename U = T>
+    inline typename std::enable_if<
+        !std::is_same<typename U::PrimaryKeyType, void>::value,
+        void>::type
+    findByPrimaryKey(const TraitsPKType &key,
+                     const SingleRowCallback &rcb,
+                     const ExceptionCallback &ecb) noexcept
+    {
+        static_assert(!std::is_same<typename T::PrimaryKeyType, void>::value,
+                      "No primary key in the table!");
+        static_assert(
+            internal::has_sqlForFindingByPrimaryKey<T>::value,
+            "No function member named sqlForFindingByPrimaryKey, please "
+            "make sure that the model class is generated by the latest "
+            "version of drogon_ctl");
+        // findOne(Criteria(T::primaryKeyName, key), rcb, ecb);
+        std::string sql = T::sqlForFindingByPrimaryKey();
+        if (_forUpdate)
+        {
+            sql += " for update";
+        }
+        clear();
+        auto binder = *_client << std::move(sql);
+        outputPrimeryKeyToBinder(key, binder);
+        binder >> [=](const Result &r) {
+            if (r.size() == 0)
+            {
+                ecb(UnexpectedRows("0 rows found"));
+            }
+            else if (r.size() > 1)
+            {
+                ecb(UnexpectedRows("Found more than one row"));
+            }
+            else
+            {
+                rcb(T(r[0]));
+            }
+        };
+        binder >> ecb;
+    }
+    template <typename U = T>
+    inline typename std::enable_if<
+        std::is_same<typename U::PrimaryKeyType, void>::value,
+        void>::type
+    findByPrimaryKey(const TraitsPKType &key,
+                     const SingleRowCallback &rcb,
+                     const ExceptionCallback &ecb) noexcept
+    {
+        LOG_FATAL << "The table must have a primary key";
+        abort();
+    }
+
+    /**
+     * @brief Asynchronously find a record by the primary key.
+     *
+     * @param key The value of the primary key.
+     * @return std::future<T> The future object with which user can get the
+     * result.
+     * @note If no hit record exists, an UnexpectedRows exception is thrown when
+     * user calls the get() method of the future object.
+     */
+    template <typename U = T>
+    inline typename std::enable_if<
+        !std::is_same<typename U::PrimaryKeyType, void>::value,
+        std::future<T>>::type
+    findFutureByPrimaryKey(const TraitsPKType &key) noexcept
+    {
+        static_assert(!std::is_same<typename T::PrimaryKeyType, void>::value,
+                      "No primary key in the table!");
+        static_assert(
+            internal::has_sqlForFindingByPrimaryKey<T>::value,
+            "No function member named sqlForFindingByPrimaryKey, please "
+            "make sure that the model class is generated by the latest "
+            "version of drogon_ctl");
+        // return findFutureOne(Criteria(T::primaryKeyName, key));
+        std::string sql = T::sqlForFindingByPrimaryKey();
+        if (_forUpdate)
+        {
+            sql += " for update";
+        }
+        clear();
+        auto binder = *_client << std::move(sql);
+        outputPrimeryKeyToBinder(key, binder);
+
+        std::shared_ptr<std::promise<T>> prom =
+            std::make_shared<std::promise<T>>();
+        binder >> [=](const Result &r) {
+            if (r.size() == 0)
+            {
+                try
+                {
+                    throw UnexpectedRows("0 rows found");
+                }
+                catch (...)
+                {
+                    prom->set_exception(std::current_exception());
+                }
+            }
+            else if (r.size() > 1)
+            {
+                try
+                {
+                    throw UnexpectedRows("Found more than one row");
+                }
+                catch (...)
+                {
+                    prom->set_exception(std::current_exception());
+                }
+            }
+            else
+            {
+                prom->set_value(T(r[0]));
+            }
+        };
+        binder >> [=](const std::exception_ptr &e) { prom->set_exception(e); };
+        binder.exec();
+        return prom->get_future();
+    }
+
+    template <typename U = T>
+    inline typename std::enable_if<
+        std::is_same<typename U::PrimaryKeyType, void>::value,
+        std::future<U>>::type
+    findFutureByPrimaryKey(const TraitsPKType &key) noexcept
+    {
+        LOG_FATAL << "The table must have a primary key";
+        abort();
+    }
+
+    /**
+     * @brief Find all the records in the table.
+     *
+     * @return std::vector<T> The vector of all the records.
+     */
     std::vector<T> findAll() noexcept(false);
+
+    /**
+     * @brief Asynchronously find all the records in the table.
+     *
+     * @param rcb is called with the result.
+     * @param ecb is called when an error occurs.
+     */
     void findAll(const MultipleRowsCallback &rcb,
                  const ExceptionCallback &ecb) noexcept;
+
+    /**
+     * @brief Asynchronously find all the records in the table.
+     *
+     * @return std::future<std::vector<T>> The future object with which user can
+     * get the result.
+     */
     std::future<std::vector<T>> findFutureAll() noexcept;
 
+    /**
+     * @brief Get the count of rows that match the given criteria.
+     *
+     * @param criteria The criteria.
+     * @return size_t The number of rows.
+     */
     size_t count(const Criteria &criteria = Criteria()) noexcept(false);
+
+    /**
+     * @brief Asynchronously get the number of rows that match the given
+     * criteria.
+     *
+     * @param criteria The criteria.
+     * @param rcb is clalled with the result.
+     * @param ecb is called when an error occurs.
+     */
     void count(const Criteria &criteria,
                const CountCallback &rcb,
                const ExceptionCallback &ecb) noexcept;
+
+    /**
+     * @brief Asynchronously get the number of rows that match the given
+     * criteria.
+     *
+     * @param criteria The criteria.
+     * @return std::future<size_t> The future object with which user can get the
+     * number of rows
+     */
     std::future<size_t> countFuture(
         const Criteria &criteria = Criteria()) noexcept;
 
+    /**
+     * @brief Find one record that matches the given criteria.
+     *
+     * @param criteria The criteria.
+     * @return T The result record.
+     * @note if the number of rows is greater than one or equal to zero, an
+     * UnexpectedRows exception is thrown.
+     */
     T findOne(const Criteria &criteria) noexcept(false);
+
+    /**
+     * @brief Asynchronously find one record that matches the given criteria.
+     *
+     * @param criteria The criteria.
+     * @param rcb is called with the result.
+     * @param ecb is called when an error occurs.
+     */
     void findOne(const Criteria &criteria,
                  const SingleRowCallback &rcb,
                  const ExceptionCallback &ecb) noexcept;
+
+    /**
+     * @brief Asynchronously find one record that matches the given criteria.
+     *
+     * @param criteria The criteria.
+     * @return std::future<T> The future object with which user can get the
+     * result.
+     * @note if the number of rows is greater than one or equal to zero, an
+     * UnexpectedRows exception is thrown when the get() method of the future
+     * object is called.
+     */
     std::future<T> findFutureOne(const Criteria &criteria) noexcept;
 
+    /**
+     * @brief Select the rows that match the given criteria.
+     *
+     * @param criteria The criteria.
+     * @return std::vector<T> The vector of rows that match the given criteria.
+     */
     std::vector<T> findBy(const Criteria &criteria) noexcept(false);
+
+    /**
+     * @brief Asynchronously select the rows that match the given criteria.
+     *
+     * @param criteria The criteria.
+     * @param rcb is called with the result.
+     * @param ecb is called when an error occurs.
+     */
     void findBy(const Criteria &criteria,
                 const MultipleRowsCallback &rcb,
                 const ExceptionCallback &ecb) noexcept;
+
+    /**
+     * @brief Asynchronously select the rows that match the given criteria.
+     *
+     * @param criteria The criteria.
+     * @return std::future<std::vector<T>> The future object with which user can
+     * get the result.
+     */
     std::future<std::vector<T>> findFutureBy(const Criteria &criteria) noexcept;
 
+    /**
+     * @brief Insert a row into the table.
+     *
+     * @param obj The object to be inserted.
+     * @note The auto-increased primary key (if it exists) is set to the obj
+     * argument after the method returns.
+     */
     void insert(T &obj) noexcept(false);
+
+    /**
+     * @brief Asynchronously insert a row into the table.
+     *
+     * @param obj The object to be inserted.
+     * @param rcb is called with the result (with the auto-increased primary key
+     * (if it exists)).
+     * @param ecb is called when an error occurs.
+     */
     void insert(const T &obj,
                 const SingleRowCallback &rcb,
                 const ExceptionCallback &ecb) noexcept;
+
+    /**
+     * @brief Asynchronously insert a row into the table.
+     *
+     * @return std::future<T> The future object with which user can get the
+     * result (with the auto-increased primary key (if it exists)).
+     */
     std::future<T> insertFuture(const T &) noexcept;
 
+    /**
+     * @brief Update a record.
+     *
+     * @param obj The record.
+     * @return size_t The number of updated records. It only could be 0 or 1.
+     * @note The table must have a primary key.
+     */
     size_t update(const T &obj) noexcept(false);
+
+    /**
+     * @brief Asynchronously update a record.
+     *
+     * @param obj The record.
+     * @param rcb is called with the number of updated records.
+     * @param ecb is called when an error occurs.
+     * @note The table must have a primary key.
+     */
     void update(const T &obj,
                 const CountCallback &rcb,
                 const ExceptionCallback &ecb) noexcept;
+
+    /**
+     * @brief Asynchronously update a record.
+     *
+     * @param obj The record.
+     * @return std::future<size_t> The future object with which user can get the
+     * number of updated records.
+     * @note The table must have a primary key.
+     */
     std::future<size_t> updateFuture(const T &obj) noexcept;
 
+    /**
+     * @brief Delete a record from the table.
+     *
+     * @param obj The record.
+     * @return size_t The number of deleted records.
+     * @note The table must have a primary key.
+     */
     size_t deleteOne(const T &obj) noexcept(false);
+
+    /**
+     * @brief Asynchronously delete a record from the table.
+     *
+     * @param obj The record.
+     * @param rcb is called with the number of deleted records.
+     * @param ecb is called when an error occurs.
+     * @note The table must have a primary key.
+     */
     void deleteOne(const T &obj,
                    const CountCallback &rcb,
                    const ExceptionCallback &ecb) noexcept;
+
+    /**
+     * @brief Asynchronously delete a record from the table.
+     *
+     * @param obj The record.
+     * @return std::future<size_t> The future object with which user can get the
+     * number of deleted records.
+     * @note The table must have a primary key.
+     */
     std::future<size_t> deleteFutureOne(const T &obj) noexcept;
 
+    /**
+     * @brief Delete records that satisfy the given criteria.
+     *
+     * @param criteria The criteria.
+     * @return size_t The number of deleted records.
+     */
     size_t deleteBy(const Criteria &criteria) noexcept(false);
+
+    /**
+     * @brief Delete records that match the given criteria asynchronously.
+     *
+     * @param criteria The criteria
+     * @param rcb is called with the number of deleted records.
+     * @param ecb is called when an error occurs.
+     */
     void deleteBy(const Criteria &criteria,
                   const CountCallback &rcb,
                   const ExceptionCallback &ecb) noexcept;
+
+    /**
+     * @brief Delete records that match the given criteria asynchronously.
+     *
+     * @param criteria The criteria
+     * @return std::future<size_t> The future object with which user can get the
+     * number of deleted records
+     */
     std::future<size_t> deleteFutureBy(const Criteria &criteria) noexcept;
+
+    /**
+     * @brief Delete the record that matches the given primary key.
+     *
+     * @param key The primary key.
+     * @return size_t The number of deleted records (1 or 0).
+     */
+    size_t deleteByPrimaryKey(const TraitsPKType &key) noexcept(false);
+
+    /**
+     * @brief Asynchronously delete the record that matches the given primary
+     * key.
+     *
+     * @param key The primary key.
+     * @param rcb is called with the number of deleted records.
+     * @param ecb is called when an error occurs.
+     */
+    void deleteByPrimaryKey(const TraitsPKType &key,
+                            const CountCallback &rcb,
+                            const ExceptionCallback &ecb) noexcept;
+
+    /**
+     * @brief Delete the record that matches the given primary key
+     * asynchronously.
+     *
+     * @param key The primary key.
+     * @return std::future<size_t> The future object with which user can get the
+     * number of deleted records
+     */
+    std::future<size_t> deleteFutureByPrimaryKey(
+        const TraitsPKType &key) noexcept;
 
   private:
     DbClientPtr _client;
@@ -199,132 +705,6 @@ class Mapper
     std::string replaceSqlPlaceHolder(const std::string &sqlStr,
                                       const std::string &holderStr) const;
 };
-
-template <typename T>
-inline T Mapper<T>::findByPrimaryKey(
-    const typename Mapper<T>::TraitsPKType &key) noexcept(false)
-{
-    static_assert(!std::is_same<typename T::PrimaryKeyType, void>::value,
-                  "No primary key in the table!");
-    // return findOne(Criteria(T::primaryKeyName, key));
-    std::string sql = "select * from ";
-    sql += T::tableName;
-    makePrimaryKeyCriteria(sql);
-    if (_forUpdate)
-    {
-        sql += " for update";
-    }
-    sql = replaceSqlPlaceHolder(sql, "$?");
-    clear();
-    Result r(nullptr);
-    {
-        auto binder = *_client << std::move(sql);
-        outputPrimeryKeyToBinder(key, binder);
-        binder << Mode::Blocking;
-        binder >> [&r](const Result &result) { r = result; };
-        binder.exec();  // exec may be throw exception;
-    }
-    if (r.size() == 0)
-    {
-        throw UnexpectedRows("0 rows found");
-    }
-    else if (r.size() > 1)
-    {
-        throw UnexpectedRows("Found more than one row");
-    }
-    auto row = r[0];
-    return T(row);
-}
-
-template <typename T>
-inline void Mapper<T>::findByPrimaryKey(
-    const typename Mapper<T>::TraitsPKType &key,
-    const SingleRowCallback &rcb,
-    const ExceptionCallback &ecb) noexcept
-{
-    static_assert(!std::is_same<typename T::PrimaryKeyType, void>::value,
-                  "No primary key in the table!");
-    // findOne(Criteria(T::primaryKeyName, key), rcb, ecb);
-    std::string sql = "select * from ";
-    sql += T::tableName;
-    makePrimaryKeyCriteria(sql);
-    if (_forUpdate)
-    {
-        sql += " for update";
-    }
-    sql = replaceSqlPlaceHolder(sql, "$?");
-    clear();
-    auto binder = *_client << std::move(sql);
-    outputPrimeryKeyToBinder(key, binder);
-    binder >> [=](const Result &r) {
-        if (r.size() == 0)
-        {
-            ecb(UnexpectedRows("0 rows found"));
-        }
-        else if (r.size() > 1)
-        {
-            ecb(UnexpectedRows("Found more than one row"));
-        }
-        else
-        {
-            rcb(T(r[0]));
-        }
-    };
-    binder >> ecb;
-}
-
-template <typename T>
-inline std::future<T> Mapper<T>::findFutureByPrimaryKey(
-    const typename Mapper<T>::TraitsPKType &key) noexcept
-{
-    static_assert(!std::is_same<typename T::PrimaryKeyType, void>::value,
-                  "No primary key in the table!");
-    // return findFutureOne(Criteria(T::primaryKeyName, key));
-    std::string sql = "select * from ";
-    sql += T::tableName;
-    makePrimaryKeyCriteria(sql);
-    if (_forUpdate)
-    {
-        sql += " for update";
-    }
-    sql = replaceSqlPlaceHolder(sql, "$?");
-    clear();
-    auto binder = *_client << std::move(sql);
-    outputPrimeryKeyToBinder(key, binder);
-
-    std::shared_ptr<std::promise<T>> prom = std::make_shared<std::promise<T>>();
-    binder >> [=](const Result &r) {
-        if (r.size() == 0)
-        {
-            try
-            {
-                throw UnexpectedRows("0 rows found");
-            }
-            catch (...)
-            {
-                prom->set_exception(std::current_exception());
-            }
-        }
-        else if (r.size() > 1)
-        {
-            try
-            {
-                throw UnexpectedRows("Found more than one row");
-            }
-            catch (...)
-            {
-                prom->set_exception(std::current_exception());
-            }
-        }
-        else
-        {
-            prom->set_value(T(r[0]));
-        }
-    };
-    binder >> [=](const std::exception_ptr &e) { prom->set_exception(e); };
-    binder.exec();
-    return prom->get_future();
-}
 
 template <typename T>
 inline T Mapper<T>::findOne(const Criteria &criteria) noexcept(false)
@@ -754,43 +1134,32 @@ template <typename T>
 inline void Mapper<T>::insert(T &obj) noexcept(false)
 {
     clear();
-    std::string sql = "insert into ";
-    sql += T::tableName;
-    sql += " (";
-    for (auto const &colName : T::insertColumns())
-    {
-        sql += colName;
-        sql += ",";
-    }
-    sql[sql.length() - 1] = ')';  // Replace the last ','
-    sql += " values (";
-    for (size_t i = 0; i < T::insertColumns().size(); i++)
-    {
-        sql += "$?,";
-    }
-    sql[sql.length() - 1] = ')';  // Replace the last ','
-    if (_client->type() == ClientType::PostgreSQL)
-    {
-        sql += " returning *";
-    }
-    sql = replaceSqlPlaceHolder(sql, "$?");
     Result r(nullptr);
+    bool needSelection = false;
     {
-        auto binder = *_client << std::move(sql);
+        auto binder = *_client << obj.sqlForInserting(needSelection);
         obj.outputArgs(binder);
         binder << Mode::Blocking;
         binder >> [&r](const Result &result) { r = result; };
         binder.exec();  // Maybe throw exception;
     }
+    assert(r.affectedRows() == 1);
     if (_client->type() == ClientType::PostgreSQL)
     {
-        assert(r.size() == 1);
-        obj = T(r[0]);
+        if (needSelection)
+        {
+            assert(r.size() == 1);
+            obj = T(r[0]);
+        }
     }
     else  // Mysql or Sqlite3
     {
         auto id = r.insertId();
         obj.updateId(id);
+        if (needSelection)
+        {
+            obj = findByPrimaryKey(obj.getPrimaryKey());
+        }
     }
 }
 template <typename T>
@@ -799,41 +1168,38 @@ inline void Mapper<T>::insert(const T &obj,
                               const ExceptionCallback &ecb) noexcept
 {
     clear();
-    std::string sql = "insert into ";
-    sql += T::tableName;
-    sql += " (";
-    for (auto const &colName : T::insertColumns())
-    {
-        sql += colName;
-        sql += ",";
-    }
-    sql[sql.length() - 1] = ')';  // Replace the last ','
-    sql += " values (";
-    for (int i = 0; i < T::insertColumns().size(); i++)
-    {
-        sql += "$?,";
-    }
-    sql[sql.length() - 1] = ')';  // Replace the last ','
-    if (_client->type() == ClientType::PostgreSQL)
-    {
-        sql += " returning *";
-    }
-    sql = replaceSqlPlaceHolder(sql, "$?");
-    auto binder = *_client << std::move(sql);
+    bool needSelection = false;
+    auto binder = *_client << obj.sqlForInserting(needSelection);
     obj.outputArgs(binder);
     auto client = _client;
-    binder >> [client, rcb, obj](const Result &r) {
+    binder >> [client, rcb, obj, needSelection, ecb](const Result &r) {
+        assert(r.affectedRows() == 1);
         if (client->type() == ClientType::PostgreSQL)
         {
-            assert(r.size() == 1);
-            rcb(T(r[0]));
+            if (needSelection)
+            {
+                assert(r.size() == 1);
+                rcb(T(r[0]));
+            }
+            else
+            {
+                rcb(obj);
+            }
         }
         else  // Mysql or Sqlite3
         {
             auto id = r.insertId();
             auto newObj = obj;
             newObj.updateId(id);
-            rcb(newObj);
+            if (needSelection)
+            {
+                auto tmp = Mapper<T>(client);
+                tmp.findByPrimaryKey(newObj.getPrimaryKey(), rcb, ecb);
+            }
+            else
+            {
+                rcb(newObj);
+            }
         }
     };
     binder >> ecb;
@@ -842,43 +1208,45 @@ template <typename T>
 inline std::future<T> Mapper<T>::insertFuture(const T &obj) noexcept
 {
     clear();
-    std::string sql = "insert into ";
-    sql += T::tableName;
-    sql += " (";
-    for (auto const &colName : T::insertColumns())
-    {
-        sql += colName;
-        sql += ",";
-    }
-    sql[sql.length() - 1] = ')';  // Replace the last ','
-    sql += " values (";
-    for (int i = 0; i < T::insertColumns().size(); i++)
-    {
-        sql += "$?,";
-    }
-    sql[sql.length() - 1] = ')';  // Replace the last ','
-    if (_client->type() == ClientType::PostgreSQL)
-    {
-        sql += " returning *";
-    }
-    sql = replaceSqlPlaceHolder(sql, "$?");
-    auto binder = *_client << std::move(sql);
+    bool needSelection = false;
+    auto binder = *_client << obj.sqlForInserting(needSelection);
     obj.outputArgs(binder);
 
     std::shared_ptr<std::promise<T>> prom = std::make_shared<std::promise<T>>();
     auto client = _client;
-    binder >> [client, prom, obj](const Result &r) {
+    binder >> [client, prom, obj, needSelection](const Result &r) {
+        assert(r.affectedRows() == 1);
         if (client->type() == ClientType::PostgreSQL)
         {
-            assert(r.size() == 1);
-            prom->set_value(T(r[0]));
+            if (needSelection)
+            {
+                assert(r.size() == 1);
+                prom->set_value(T(r[0]));
+            }
+            else
+            {
+                prom->set_value(obj);
+            }
         }
         else  // Mysql or Sqlite3
         {
             auto id = r.insertId();
             auto newObj = obj;
             newObj.updateId(id);
-            prom->set_value(newObj);
+            if (needSelection)
+            {
+                auto tmp = Mapper<T>(client);
+                tmp.findByPrimaryKey(
+                    newObj.getPrimaryKey(),
+                    [prom](T selObj) { prom->set_value(selObj); },
+                    [prom](const std::exception_ptr &e) {
+                        prom->set_exception(e);
+                    });
+            }
+            else
+            {
+                prom->set_value(newObj);
+            }
         }
     };
     binder >> [=](const std::exception_ptr &e) { prom->set_exception(e); };
@@ -1223,6 +1591,69 @@ inline std::string Mapper<T>::replaceSqlPlaceHolder(
     {
         return sqlStr;
     }
+}
+
+template <typename T>
+inline size_t Mapper<T>::deleteByPrimaryKey(
+    const typename Mapper<T>::TraitsPKType &key) noexcept(false)
+{
+    static_assert(!std::is_same<typename T::PrimaryKeyType, void>::value,
+                  "No primary key in the table!");
+    static_assert(internal::has_sqlForDeletingByPrimaryKey<T>::value,
+                  "No function member named sqlForDeletingByPrimaryKey, please "
+                  "make sure that the model class is generated by the latest "
+                  "version of drogon_ctl");
+    clear();
+    Result r(nullptr);
+    {
+        auto binder = *_client << T::sqlForDeletingByPrimaryKey();
+        outputPrimeryKeyToBinder(key, binder);
+        binder << Mode::Blocking;
+        binder >> [&r](const Result &result) { r = result; };
+        binder.exec();  // exec may be throw exception;
+    }
+    return r.affectedRows();
+}
+
+template <typename T>
+inline void Mapper<T>::deleteByPrimaryKey(
+    const typename Mapper<T>::TraitsPKType &key,
+    const CountCallback &rcb,
+    const ExceptionCallback &ecb) noexcept
+{
+    static_assert(!std::is_same<typename T::PrimaryKeyType, void>::value,
+                  "No primary key in the table!");
+    static_assert(internal::has_sqlForDeletingByPrimaryKey<T>::value,
+                  "No function member named sqlForDeletingByPrimaryKey, please "
+                  "make sure that the model class is generated by the latest "
+                  "version of drogon_ctl");
+    clear();
+    auto binder = *_client << T::sqlForDeletingByPrimaryKey();
+    outputPrimeryKeyToBinder(key, binder);
+    binder >>
+        [rcb = std::move(rcb)](const Result &r) { rcb(r.affectedRows()); };
+    binder >> ecb;
+}
+
+template <typename T>
+inline std::future<size_t> Mapper<T>::deleteFutureByPrimaryKey(
+    const typename Mapper<T>::TraitsPKType &key) noexcept
+{
+    static_assert(!std::is_same<typename T::PrimaryKeyType, void>::value,
+                  "No primary key in the table!");
+    static_assert(internal::has_sqlForDeletingByPrimaryKey<T>::value,
+                  "No function member named sqlForDeletingByPrimaryKey, please "
+                  "make sure that the model class is generated by the latest "
+                  "version of drogon_ctl");
+    clear();
+    auto binder = *_client << T::sqlForDeletingByPrimaryKey();
+    outputPrimeryKeyToBinder(key, binder);
+
+    std::shared_ptr<std::promise<T>> prom = std::make_shared<std::promise<T>>();
+    binder >> [prom](const Result &r) { prom->set_value(r.affectedRows()); };
+    binder >> [prom](const std::exception_ptr &e) { prom->set_exception(e); };
+    binder.exec();
+    return prom->get_future();
 }
 
 }  // namespace orm

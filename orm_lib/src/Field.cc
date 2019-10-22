@@ -85,36 +85,6 @@ std::vector<char> Field::as<std::vector<char>>() const
     }
 }
 
-template <>
-int Field::as<int>() const
-{
-    return atoi(_result.getValue(_row, _column));
-}
-
-template <>
-long Field::as<long>() const
-{
-    return atol(_result.getValue(_row, _column));
-}
-
-template <>
-long long Field::as<long long>() const
-{
-    return atoll(_result.getValue(_row, _column));
-}
-
-template <>
-float Field::as<float>() const
-{
-    return atof(_result.getValue(_row, _column));
-}
-
-template <>
-double Field::as<double>() const
-{
-    return std::stod(_result.getValue(_row, _column));
-}
-
 const char *Field::c_str() const
 {
     return as<const char *>();

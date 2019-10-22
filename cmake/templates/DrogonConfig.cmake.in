@@ -3,22 +3,25 @@
 #  DROGON_INCLUDE_DIRS - include directories for Drogon
 #  DROGON_LIBRARIES    - libraries to link against
 #  DROGON_EXECUTABLE   - the drogon_ctl executable
+#  DROGON_FOUND
+# This module defines the following IMPORTED target:
+# Drogon::Drogon
 
 @PACKAGE_INIT@
 
-set(DROGON_INCLUDE_DIRS "@PACKAGE_CONF_INCLUDE_DIRS@")
-
+if(NOT TRANTOR_FOUND)
 # find trantor
-set(Trantor_DIR "@PACKAGE_TRANTOR_CMAKE_DIR@")
-find_package(Trantor REQUIRED NO_DEFAULT_PATH)
+  find_package(Trantor REQUIRED)
+endif()
 
 # Our library dependencies (contains definitions for IMPORTED targets)
 
 get_filename_component(DROGON_CMAKE_DIR "${CMAKE_CURRENT_LIST_FILE}" PATH)
-if(NOT TARGET drogon AND NOT Drogon_BINARY_DIR)
+if(NOT TARGET Drogon::Drogon)
   include("${DROGON_CMAKE_DIR}/DrogonTargets.cmake")
 endif()
 
-# These are IMPORTED targets created by DrogonTargets.cmake
-set(DROGON_LIBRARIES drogon dl)
+get_target_property(DROGON_INCLUDE_DIRS Drogon::Drogon INTERFACE_INCLUDE_DIRECTORIES)
+set(DROGON_LIBRARIES Drogon::Drogon)
 set(DROGON_EXECUTABLE drogon_ctl)
+set(DROGON_FOUND TRUE)

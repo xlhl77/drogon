@@ -18,6 +18,7 @@
 #include "AOPAdvice.h"
 #include "HttpControllersRouter.h"
 #include "FiltersFunction.h"
+#include "HttpAppFrameworkImpl.h"
 #include <drogon/HttpSimpleController.h>
 #include <drogon/utils/HttpConstraint.h>
 
@@ -30,7 +31,6 @@ void HttpSimpleControllersRouter::registerHttpSimpleController(
 {
     assert(!pathName.empty());
     assert(!ctrlName.empty());
-
     std::string path(pathName);
     std::transform(pathName.begin(), pathName.end(), path.begin(), tolower);
     std::lock_guard<std::mutex> guard(_simpCtrlMutex);
@@ -56,10 +56,15 @@ void HttpSimpleControllersRouter::registerHttpSimpleController(
     auto binder = std::make_shared<CtrlBinder>();
     binder->_controllerName = ctrlName;
     binder->_filterNames = filters;
-    auto &_object = DrClassMap::getSingleInstance(ctrlName);
-    auto controller =
-        std::dynamic_pointer_cast<HttpSimpleControllerBase>(_object);
-    binder->_controller = controller;
+    drogon::app().getLoop()->queueInLoop([binder, ctrlName]() {
+        auto &_object = DrClassMap::getSingleInstance(ctrlName);
+        auto controller =
+            std::dynamic_pointer_cast<HttpSimpleControllerBase>(_object);
+        binder->_controller = controller;
+        // Recreate this with the correct number of threads.
+        binder->_responseCache = IOThreadStorage<HttpResponsePtr>();
+    });
+
     if (validMethods.size() > 0)
     {
         for (auto const &method : validMethods)
@@ -84,9 +89,7 @@ void HttpSimpleControllersRouter::registerHttpSimpleController(
 
 void HttpSimpleControllersRouter::route(
     const HttpRequestImplPtr &req,
-    std::function<void(const HttpResponsePtr &)> &&callback,
-    bool needSetJsessionid,
-    std::string &&sessionId)
+    std::function<void(const HttpResponsePtr &)> &&callback)
 {
     std::string pathLower(req->path().length(), 0);
     std::transform(req->path().begin(),
@@ -127,34 +130,23 @@ void HttpSimpleControllersRouter::route(
         {
             if (!filters.empty())
             {
-                auto sessionIdPtr =
-                    std::make_shared<std::string>(std::move(sessionId));
                 auto callbackPtr = std::make_shared<
                     std::function<void(const HttpResponsePtr &)>>(
                     std::move(callback));
-                filters_function::doFilters(filters,
-                                            req,
-                                            callbackPtr,
-                                            needSetJsessionid,
-                                            sessionIdPtr,
-                                            [=, &binder]() mutable {
-                                                doPreHandlingAdvices(
-                                                    binder,
-                                                    ctrlInfo,
-                                                    req,
-                                                    std::move(*callbackPtr),
-                                                    needSetJsessionid,
-                                                    std::move(*sessionIdPtr));
-                                            });
+                filters_function::doFilters(
+                    filters, req, callbackPtr, [=, &binder]() mutable {
+                        doPreHandlingAdvices(binder,
+                                             ctrlInfo,
+                                             req,
+                                             std::move(*callbackPtr));
+                    });
             }
             else
             {
                 doPreHandlingAdvices(binder,
                                      ctrlInfo,
                                      req,
-                                     std::move(callback),
-                                     needSetJsessionid,
-                                     std::move(sessionId));
+                                     std::move(callback));
             }
             return;
         }
@@ -170,29 +162,18 @@ void HttpSimpleControllersRouter::route(
                 callbackPtr,
                 [callbackPtr,
                  &filters,
-                 sessionId = std::move(sessionId),
                  req,
-                 needSetJsessionid,
                  &ctrlInfo,
                  this,
                  &binder]() mutable {
                     if (!filters.empty())
                     {
-                        auto sessionIdPtr =
-                            std::make_shared<std::string>(std::move(sessionId));
                         filters_function::doFilters(
-                            filters,
-                            req,
-                            callbackPtr,
-                            needSetJsessionid,
-                            sessionIdPtr,
-                            [=, &binder]() mutable {
+                            filters, req, callbackPtr, [=, &binder]() mutable {
                                 doPreHandlingAdvices(binder,
                                                      ctrlInfo,
                                                      req,
-                                                     std::move(*callbackPtr),
-                                                     needSetJsessionid,
-                                                     std::move(*sessionIdPtr));
+                                                     std::move(*callbackPtr));
                             });
                     }
                     else
@@ -200,94 +181,67 @@ void HttpSimpleControllersRouter::route(
                         doPreHandlingAdvices(binder,
                                              ctrlInfo,
                                              req,
-                                             std::move(*callbackPtr),
-                                             needSetJsessionid,
-                                             std::move(sessionId));
+                                             std::move(*callbackPtr));
                     }
                 });
         }
         return;
     }
-    _httpCtrlsRouter.route(req,
-                           std::move(callback),
-                           needSetJsessionid,
-                           std::move(sessionId));
+    _httpCtrlsRouter.route(req, std::move(callback));
 }
 
 void HttpSimpleControllersRouter::doControllerHandler(
     const CtrlBinderPtr &ctrlBinderPtr,
-    const SimpleControllerRouterItem &routerItem,
     const HttpRequestImplPtr &req,
-    std::function<void(const HttpResponsePtr &)> &&callback,
-    bool needSetJsessionid,
-    std::string &&sessionId)
+    std::function<void(const HttpResponsePtr &)> &&callback)
 {
     auto &controller = ctrlBinderPtr->_controller;
     if (controller)
     {
-        HttpResponsePtr &responsePtr =
-            ctrlBinderPtr->_responsePtrMap[req->getLoop()];
-        if (responsePtr &&
-            (responsePtr->expiredTime() == 0 ||
-             (trantor::Date::now() <
-              responsePtr->creationDate().after(responsePtr->expiredTime()))))
+        auto &responsePtr = *(ctrlBinderPtr->_responseCache);
+        if (responsePtr)
         {
-            // use cached response!
-            LOG_TRACE << "Use cached response";
-            if (!needSetJsessionid || responsePtr->statusCode() == k404NotFound)
+            if (responsePtr->expiredTime() == 0 ||
+                (trantor::Date::now() <
+                 responsePtr->creationDate().after(responsePtr->expiredTime())))
+            {
+                // use cached response!
+                LOG_TRACE << "Use cached response";
                 invokeCallback(callback, req, responsePtr);
+                return;
+            }
             else
             {
-                // make a copy response;
-                auto newResp = std::make_shared<HttpResponseImpl>(
-                    *static_cast<HttpResponseImpl *>(responsePtr.get()));
-                newResp->setExpiredTime(-1);  // make it temporary
-                newResp->addCookie("JSESSIONID", sessionId);
-                invokeCallback(callback, req, newResp);
+                responsePtr.reset();
             }
-            return;
         }
-        else
-        {
-            controller->asyncHandleHttpRequest(
-                req,
-                [=,
-                 callback = std::move(callback),
-                 &ctrlBinderPtr,
-                 sessionId =
-                     std::move(sessionId)](const HttpResponsePtr &resp) {
-                    auto newResp = resp;
-                    if (resp->expiredTime() >= 0)
+
+        controller->asyncHandleHttpRequest(
+            req,
+            [this, req, callback = std::move(callback), &ctrlBinderPtr](
+                const HttpResponsePtr &resp) {
+                auto newResp = resp;
+                if (resp->expiredTime() >= 0 &&
+                    resp->statusCode() != k404NotFound)
+                {
+                    // cache the response;
+                    static_cast<HttpResponseImpl *>(resp.get())
+                        ->makeHeaderString();
+                    auto loop = req->getLoop();
+
+                    if (loop->isInLoopThread())
                     {
-                        // cache the response;
-                        static_cast<HttpResponseImpl *>(resp.get())
-                            ->makeHeaderString();
-                        auto loop = req->getLoop();
-                        if (loop->isInLoopThread())
-                        {
-                            ctrlBinderPtr->_responsePtrMap[loop] = resp;
-                        }
-                        else
-                        {
-                            loop->queueInLoop([loop, resp, &ctrlBinderPtr]() {
-                                ctrlBinderPtr->_responsePtrMap[loop] = resp;
-                            });
-                        }
+                        ctrlBinderPtr->_responseCache.setThreadData(resp);
                     }
-                    if (needSetJsessionid && resp->statusCode() != k404NotFound)
+                    else
                     {
-                        if (resp->expiredTime() >= 0)
-                        {
-                            // make a copy
-                            newResp = std::make_shared<HttpResponseImpl>(
-                                *static_cast<HttpResponseImpl *>(resp.get()));
-                            newResp->setExpiredTime(-1);  // make it temporary
-                        }
-                        newResp->addCookie("JSESSIONID", sessionId);
+                        loop->queueInLoop([resp, &ctrlBinderPtr]() {
+                            ctrlBinderPtr->_responseCache.setThreadData(resp);
+                        });
                     }
-                    invokeCallback(callback, req, newResp);
-                });
-        }
+                }
+                invokeCallback(callback, req, newResp);
+            });
 
         return;
     }
@@ -335,10 +289,6 @@ void HttpSimpleControllersRouter::init(
             {
                 binder->_filters =
                     filters_function::createFilters(binder->_filterNames);
-                for (auto ioloop : ioLoops)
-                {
-                    binder->_responsePtrMap[ioloop] = nullptr;
-                }
             }
         }
     }
@@ -348,9 +298,7 @@ void HttpSimpleControllersRouter::doPreHandlingAdvices(
     const CtrlBinderPtr &ctrlBinderPtr,
     const SimpleControllerRouterItem &routerItem,
     const HttpRequestImplPtr &req,
-    std::function<void(const HttpResponsePtr &)> &&callback,
-    bool needSetJsessionid,
-    std::string &&sessionId)
+    std::function<void(const HttpResponsePtr &)> &&callback)
 {
     if (req->method() == Options)
     {
@@ -400,48 +348,27 @@ void HttpSimpleControllersRouter::doPreHandlingAdvices(
     }
     if (_preHandlingAdvices.empty())
     {
-        doControllerHandler(ctrlBinderPtr,
-                            routerItem,
-                            req,
-                            std::move(callback),
-                            needSetJsessionid,
-                            std::move(sessionId));
+        doControllerHandler(ctrlBinderPtr, req, std::move(callback));
     }
     else
     {
         auto callbackPtr =
             std::make_shared<std::function<void(const HttpResponsePtr &)>>(
                 std::move(callback));
-        auto sessionIdPtr = std::make_shared<std::string>(std::move(sessionId));
         doAdvicesChain(
             _preHandlingAdvices,
             0,
             req,
             std::make_shared<std::function<void(const HttpResponsePtr &)>>(
-                [callbackPtr, needSetJsessionid, sessionIdPtr](
-                    const HttpResponsePtr &resp) {
-                    if (!needSetJsessionid ||
-                        resp->statusCode() == k404NotFound)
-                        (*callbackPtr)(resp);
-                    else
-                    {
-                        resp->addCookie("JSESSIONID", *sessionIdPtr);
-                        (*callbackPtr)(resp);
-                    }
+                [req, callbackPtr](const HttpResponsePtr &resp) {
+                    HttpAppFrameworkImpl::instance().callCallback(req,
+                                                                  resp,
+                                                                  *callbackPtr);
                 }),
-            [this,
-             ctrlBinderPtr,
-             &routerItem,
-             req,
-             callbackPtr,
-             needSetJsessionid,
-             sessionIdPtr]() {
+            [this, ctrlBinderPtr, req, callbackPtr]() {
                 doControllerHandler(ctrlBinderPtr,
-                                    routerItem,
                                     req,
-                                    std::move(*callbackPtr),
-                                    needSetJsessionid,
-                                    std::move(*sessionIdPtr));
+                                    std::move(*callbackPtr));
             });
     }
 }
@@ -455,5 +382,5 @@ void HttpSimpleControllersRouter::invokeCallback(
     {
         advice(req, resp);
     }
-    callback(resp);
+    HttpAppFrameworkImpl::instance().callCallback(req, resp, callback);
 }

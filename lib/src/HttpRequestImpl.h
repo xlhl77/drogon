@@ -46,7 +46,28 @@ class HttpRequestImpl : public HttpRequest
           _loop(loop)
     {
     }
-
+    void reset()
+    {
+        _method = Invalid;
+        _version = kUnknown;
+        _contentLen = 0;
+        _headers.clear();
+        _cookies.clear();
+        _flagForParsingParameters = false;
+        _path.clear();
+        _matchedPathPattern = "";
+        _query.clear();
+        _parameters.clear();
+        _jsonPtr.reset();
+        _sessionPtr.reset();
+        _attributesPtr.reset();
+        _cacheFilePtr.reset();
+        _expect.clear();
+        _content.clear();
+        _contentType = CT_TEXT_PLAIN;
+        _contentTypeString.clear();
+        _keepAlive = true;
+    }
     trantor::EventLoop *getLoop()
     {
         return _loop;
@@ -55,6 +76,10 @@ class HttpRequestImpl : public HttpRequest
     void setVersion(Version v)
     {
         _version = v;
+        if (v == kHttp10)
+        {
+            _keepAlive = false;
+        }
     }
 
     virtual Version version() const override
@@ -79,7 +104,14 @@ class HttpRequestImpl : public HttpRequest
 
     void setPath(const char *start, const char *end)
     {
-        _path = utils::urlDecode(start, end);
+        if (utils::needUrlDecoding(start, end))
+        {
+            _path = utils::urlDecode(start, end);
+        }
+        else
+        {
+            _path.append(start, end);
+        }
     }
 
     virtual void setPath(const std::string &path) override
@@ -95,9 +127,9 @@ class HttpRequestImpl : public HttpRequest
     }
 
     virtual const std::string &getParameter(
-        const std::string &key,
-        const std::string &defaultVal = std::string()) const override
+        const std::string &key) const override
     {
+        const static std::string defaultVal;
         parseParametersOnce();
         auto iter = _parameters.find(key);
         if (iter != _parameters.end())
@@ -161,15 +193,14 @@ class HttpRequestImpl : public HttpRequest
 
     string_view queryView() const
     {
-        if (!_query.empty())
-            return _query;
-        if (_method == Post)
-        {
-            if (_cacheFilePtr)
-                return _cacheFilePtr->getStringView();
-            return _content;
-        }
         return _query;
+    }
+
+    string_view contentView() const
+    {
+        if (_cacheFilePtr)
+            return _cacheFilePtr->getStringView();
+        return _content;
     }
 
     virtual const std::string &query() const override
@@ -209,30 +240,25 @@ class HttpRequestImpl : public HttpRequest
 
     void addHeader(const char *start, const char *colon, const char *end);
 
-    const std::string &getHeader(
-        const std::string &field,
-        const std::string &defaultVal = std::string()) const override
+    const std::string &getHeader(const std::string &field) const override
     {
         auto lowField = field;
         std::transform(lowField.begin(),
                        lowField.end(),
                        lowField.begin(),
                        tolower);
-        return getHeaderBy(lowField, defaultVal);
+        return getHeaderBy(lowField);
     }
 
-    const std::string &getHeader(
-        std::string &&field,
-        const std::string &defaultVal = std::string()) const override
+    const std::string &getHeader(std::string &&field) const override
     {
         std::transform(field.begin(), field.end(), field.begin(), tolower);
-        return getHeaderBy(field, defaultVal);
+        return getHeaderBy(field);
     }
 
-    const std::string &getHeaderBy(
-        const std::string &lowerField,
-        const std::string &defaultVal = std::string()) const
+    const std::string &getHeaderBy(const std::string &lowerField) const
     {
+        const static std::string defaultVal;
         auto it = _headers.find(lowerField);
         if (it != _headers.end())
         {
@@ -241,10 +267,9 @@ class HttpRequestImpl : public HttpRequest
         return defaultVal;
     }
 
-    const std::string &getCookie(
-        const std::string &field,
-        const std::string &defaultVal = std::string()) const override
+    const std::string &getCookie(const std::string &field) const override
     {
+        const static std::string defaultVal;
         auto it = _cookies.find(field);
         if (it != _cookies.end())
         {
@@ -316,12 +341,32 @@ class HttpRequestImpl : public HttpRequest
         _sessionPtr = session;
     }
 
+    virtual AttributesPtr attributes() const override
+    {
+        if (!_attributesPtr)
+        {
+            _attributesPtr = std::make_shared<Attributes>();
+        }
+        return _attributesPtr;
+    }
+
     virtual const std::shared_ptr<Json::Value> jsonObject() const override
     {
-        parseParametersOnce();
+        // Not multi-thread safe but good, because we basically call this
+        // function in a single thread
+        if (!_flagForParsingJson)
+        {
+            _flagForParsingJson = true;
+            parseJson();
+        }
         return _jsonPtr;
     }
 
+    virtual void setCustomContentTypeString(const std::string &type) override
+    {
+        _contentType = CT_NONE;
+        _contentTypeString = type;
+    }
     virtual void setContentTypeCode(const ContentType type) override
     {
         _contentType = type;
@@ -354,7 +399,14 @@ class HttpRequestImpl : public HttpRequest
     {
         _matchedPathPattern = pathPattern;
     }
-
+    const std::string &expect() const
+    {
+        return _expect;
+    }
+    bool keepAlive() const
+    {
+        return _keepAlive;
+    }
     ~HttpRequestImpl();
 
   protected:
@@ -380,7 +432,10 @@ class HttpRequestImpl : public HttpRequest
             parseParameters();
         }
     }
+
+    void parseJson() const;
     mutable bool _flagForParsingParameters = false;
+    mutable bool _flagForParsingJson = false;
     HttpMethod _method;
     Version _version;
     std::string _path;
@@ -391,10 +446,13 @@ class HttpRequestImpl : public HttpRequest
     mutable std::unordered_map<std::string, std::string> _parameters;
     mutable std::shared_ptr<Json::Value> _jsonPtr;
     SessionPtr _sessionPtr;
+    mutable AttributesPtr _attributesPtr;
     trantor::InetAddress _peer;
     trantor::InetAddress _local;
     trantor::Date _date;
     std::unique_ptr<CacheFile> _cacheFilePtr;
+    std::string _expect;
+    bool _keepAlive = true;
 
   protected:
     std::string _content;

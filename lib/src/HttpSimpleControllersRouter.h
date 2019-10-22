@@ -17,6 +17,7 @@
 #include "impl_forwards.h"
 #include <drogon/drogon_callbacks.h>
 #include <drogon/utils/HttpConstraint.h>
+#include <drogon/IOThreadStorage.h>
 #include <trantor/utils/NonCopyable.h>
 #include <atomic>
 #include <memory>
@@ -64,9 +65,7 @@ class HttpSimpleControllersRouter : public trantor::NonCopyable
         const std::string &ctrlName,
         const std::vector<internal::HttpConstraint> &filtersAndMethods);
     void route(const HttpRequestImplPtr &req,
-               std::function<void(const HttpResponsePtr &)> &&callback,
-               bool needSetJsessionid,
-               std::string &&sessionId);
+               std::function<void(const HttpResponsePtr &)> &&callback);
     void init(const std::vector<trantor::EventLoop *> &ioLoops);
 
     std::vector<std::tuple<std::string, HttpMethod, std::string>>
@@ -96,10 +95,10 @@ class HttpSimpleControllersRouter : public trantor::NonCopyable
         std::string _controllerName;
         std::vector<std::string> _filterNames;
         std::vector<std::shared_ptr<HttpFilterBase>> _filters;
-        std::map<trantor::EventLoop *, std::shared_ptr<HttpResponse>>
-            _responsePtrMap;
+        IOThreadStorage<HttpResponsePtr> _responseCache;
         bool _isCORS = false;
     };
+
     typedef std::shared_ptr<CtrlBinder> CtrlBinderPtr;
 
     struct SimpleControllerRouterItem
@@ -113,16 +112,11 @@ class HttpSimpleControllersRouter : public trantor::NonCopyable
         const CtrlBinderPtr &ctrlBinderPtr,
         const SimpleControllerRouterItem &routerItem,
         const HttpRequestImplPtr &req,
-        std::function<void(const HttpResponsePtr &)> &&callback,
-        bool needSetJsessionid,
-        std::string &&sessionId);
+        std::function<void(const HttpResponsePtr &)> &&callback);
     void doControllerHandler(
         const CtrlBinderPtr &ctrlBinderPtr,
-        const SimpleControllerRouterItem &routerItem,
         const HttpRequestImplPtr &req,
-        std::function<void(const HttpResponsePtr &)> &&callback,
-        bool needSetJsessionid,
-        std::string &&sessionId);
+        std::function<void(const HttpResponsePtr &)> &&callback);
     void invokeCallback(
         const std::function<void(const HttpResponsePtr &)> &callback,
         const HttpRequestImplPtr &req,

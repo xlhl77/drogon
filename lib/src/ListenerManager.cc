@@ -70,7 +70,9 @@ std::vector<trantor::EventLoop *> ListenerManager::createListeners(
     size_t connectionTimeout,
     const std::string &globalCertFile,
     const std::string &globalKeyFile,
-    size_t threadNum)
+    size_t threadNum,
+    const std::vector<std::function<HttpResponsePtr(const HttpRequestPtr &)>>
+        &syncAdvices)
 {
 #ifdef __linux__
     std::vector<trantor::EventLoop *> ioLoops;
@@ -83,7 +85,7 @@ std::vector<trantor::EventLoop *> ListenerManager::createListeners(
         for (auto const &listener : _listeners)
         {
             auto const &ip = listener._ip;
-            bool isIpv6 = ip.find(":") == std::string::npos ? false : true;
+            bool isIpv6 = ip.find(':') == std::string::npos ? false : true;
             std::shared_ptr<HttpServer> serverPtr;
             if (i == 0)
             {
@@ -97,14 +99,16 @@ std::vector<trantor::EventLoop *> ListenerManager::createListeners(
                 serverPtr = std::make_shared<HttpServer>(
                     loopThreadPtr->getLoop(),
                     InetAddress(ip, listener._port, isIpv6),
-                    "drogon");
+                    "drogon",
+                    syncAdvices);
             }
             else
             {
                 serverPtr = std::make_shared<HttpServer>(
                     loopThreadPtr->getLoop(),
                     InetAddress(ip, listener._port, isIpv6),
-                    "drogon");
+                    "drogon",
+                    syncAdvices);
             }
 
             if (listener._useSSL)
@@ -143,11 +147,12 @@ std::vector<trantor::EventLoop *> ListenerManager::createListeners(
     {
         LOG_TRACE << "thread num=" << threadNum;
         auto ip = listener._ip;
-        bool isIpv6 = ip.find(":") == std::string::npos ? false : true;
+        bool isIpv6 = ip.find(':') == std::string::npos ? false : true;
         auto serverPtr = std::make_shared<HttpServer>(
             loopThreadPtr->getLoop(),
             InetAddress(ip, listener._port, isIpv6),
-            "drogon");
+            "drogon",
+            syncAdvices);
         if (listener._useSSL)
         {
 #ifdef OpenSSL_FOUND
@@ -181,8 +186,24 @@ std::vector<trantor::EventLoop *> ListenerManager::createListeners(
 
 void ListenerManager::startListening()
 {
+    if (_listeners.size() == 0)
+        return;
     for (auto &loopThread : _listeningloopThreads)
     {
         loopThread->run();
+    }
+}
+
+ListenerManager::~ListenerManager()
+{
+    for (size_t i = 0; i < _servers.size(); ++i)
+    {
+        std::promise<int> pro;
+        auto f = pro.get_future();
+        _servers[i]->getLoop()->runInLoop([&pro, this, i] {
+            _servers[i].reset();
+            pro.set_value(1);
+        });
+        (void)f.get();
     }
 }

@@ -30,7 +30,7 @@ int main()
         {
             for (auto const &f : row)
             {
-                std::cout << f.name() << " : " << f.as<int>() << std::endl;
+                std::cout << f.name() << " : " << std::endl;
             }
         }
     }
@@ -131,6 +131,13 @@ int main()
             {
                 std::cout << i++ << ": user name is "
                           << row["user_name"].as<std::string>() << std::endl;
+                std::cout << "admin column is "
+                          << (row["admin"].isNull() ? "null" : "not null")
+                          << std::endl;
+                std::cout << "bool value of admin column is :"
+                          << row["admin"].as<bool>() << std::endl;
+                std::cout << "string value of admin column is :"
+                          << row["admin"].as<std::string>() << std::endl;
             }
         },
         [](const DrogonDbException &e) {
@@ -147,5 +154,20 @@ int main()
     } >> [](const DrogonDbException &e) {
         std::cerr << "error:" << e.base().what() << std::endl;
     };
+
+    *clientPtr << "select t1.*, t2.* from users t1 left join groups t2 on "
+                  "t1.talkgroup_uuid=t2.g_uuid" >>
+        [](const Result &r) {
+            std::cout << r.size() << " rows selected!" << std::endl;
+            if (r.size() == 0)
+                return;
+            for (auto f : r[0])
+            {
+                std::cout << f.name() << std::endl;
+            }
+        } >>
+        [](const DrogonDbException &e) {
+            std::cerr << "error:" << e.base().what() << std::endl;
+        };
     getchar();
 }

@@ -15,8 +15,9 @@
 #include "Users.h"
 #include <drogon/config.h>
 #include <drogon/orm/DbClient.h>
-#include <iostream>
 #include <trantor/utils/Logger.h>
+#include <iostream>
+#include <chrono>
 #include <unistd.h>
 #include <stdlib.h>
 
@@ -26,17 +27,19 @@ using namespace drogon_model::postgres;
 #define RESET "\033[0m"
 #define RED "\033[31m"   /* Red */
 #define GREEN "\033[32m" /* Green */
-#define TEST_COUNT 34
+#define TEST_COUNT 36
 
 int counter = 0;
+int gLoops = 1;
 std::promise<int> pro;
 auto globalf = pro.get_future();
 
+using namespace std::chrono_literals;
 void addCount(int &count, std::promise<int> &pro)
 {
     ++count;
     // LOG_DEBUG << count;
-    if (count == TEST_COUNT)
+    if (count == TEST_COUNT * gLoops)
     {
         pro.set_value(1);
     }
@@ -58,15 +61,8 @@ void testOutput(bool isGood, const std::string &testMessage)
     }
 }
 
-int main()
+void doTest(const drogon::orm::DbClientPtr &clientPtr)
 {
-    trantor::Logger::setLogLevel(trantor::Logger::DEBUG);
-#if USE_POSTGRESQL
-    auto clientPtr = DbClient::newPgClient(
-        "host=127.0.0.1 port=5432 dbname=postgres user=postgres", 1);
-#endif
-    LOG_DEBUG << "start!";
-    sleep(1);
     // Prepare the test environment
     *clientPtr << "DROP TABLE IF EXISTS USERS" >> [](const Result &r) {
         testOutput(true, "Prepare the test environment(0)");
@@ -543,7 +539,50 @@ int main()
             std::cerr << e.base().what() << std::endl;
             testOutput(false, "ORM mapper asynchronous interface(1)");
         });
-    globalf.get();
+    /// 5.3 select where in
+    mapper.findBy(
+        Criteria(Users::Cols::_id,
+                 CompareOperator::IN,
+                 std::vector<int32_t>{10, 200}),
+        [](std::vector<Users> users) {
+            testOutput(users.size() == 1,
+                       "ORM mapper asynchronous interface(2)");
+        },
+        [](const DrogonDbException &e) {
+            std::cerr << e.base().what() << std::endl;
+            testOutput(false, "ORM mapper asynchronous interface(2)");
+        });
+
+    /// 5.4 find by primary key. blocking
+    try
+    {
+        auto user = mapper.findByPrimaryKey(10);
+        testOutput(true, "ORM mapper asynchronous interface(3)");
+    }
+    catch (const DrogonDbException &e)
+    {
+        std::cerr << e.base().what() << std::endl;
+        testOutput(false, "ORM mapper asynchronous interface(3)");
+    }
+}
+int main(int argc, char *argv[])
+{
+    trantor::Logger::setLogLevel(trantor::Logger::DEBUG);
+#if USE_POSTGRESQL
+    auto clientPtr = DbClient::newPgClient(
+        "host=127.0.0.1 port=5432 dbname=postgres user=postgres", 1);
+#endif
+    LOG_DEBUG << "start!";
     sleep(1);
+    if (argc == 2)
+    {
+        gLoops = atoi(argv[1]);
+    }
+    for (int i = 0; i < gLoops; ++i)
+    {
+        doTest(clientPtr);
+    }
+    globalf.get();
+    std::this_thread::sleep_for(0.008s);
     return 0;
 }

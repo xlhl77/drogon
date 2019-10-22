@@ -18,21 +18,22 @@ class ApiTest : public drogon::HttpController<ApiTest>
                "drogon::IntranetIpFilter");
     METHOD_ADD(ApiTest::rootPost, "", Post, Options);
     METHOD_ADD(ApiTest::get,
-               "/get/{2}/{1}",
+               "/get/{2:p2}/{1:p1}",
                Get);  // path is /api/v1/apitest/get/{arg2}/{arg1}
     METHOD_ADD(ApiTest::your_method_name,
-               "/{1}/List?P2={2}",
+               "/{PI}/List?P2={}",
                Get);  // path is /api/v1/apitest/{arg1}/list
     METHOD_ADD(ApiTest::staticApi, "/static", Get, Options);  // CORS
     METHOD_ADD(ApiTest::staticApi, "/static", Post, Put, Delete);
     METHOD_ADD(ApiTest::get2,
-               "/get/{1}",
+               "/get/{}",
                Get);  // path is /api/v1/apitest/get/{arg1}
     ADD_METHOD_TO(ApiTest::get2,
-                  "/absolute/{1}",
+                  "/absolute/{}",
                   Get);  // path is /absolute/{arg1}
     METHOD_ADD(ApiTest::jsonTest, "/json", Post);
     METHOD_ADD(ApiTest::formTest, "/form", Post);
+    METHOD_ADD(ApiTest::attributesTest, "/attrs", Get);
     METHOD_LIST_END
 
     void get(const HttpRequestPtr &req,
@@ -53,10 +54,13 @@ class ApiTest : public drogon::HttpController<ApiTest>
                  std::function<void(const HttpResponsePtr &)> &&callback);
     void rootPost(const HttpRequestPtr &req,
                   std::function<void(const HttpResponsePtr &)> &&callback);
-    void jsonTest(const HttpRequestPtr &req,
+    void jsonTest(std::shared_ptr<Json::Value> &&json,
                   std::function<void(const HttpResponsePtr &)> &&callback);
     void formTest(const HttpRequestPtr &req,
                   std::function<void(const HttpResponsePtr &)> &&callback);
+    void attributesTest(
+        const HttpRequestPtr &req,
+        std::function<void(const HttpResponsePtr &)> &&callback);
 
   public:
     ApiTest()

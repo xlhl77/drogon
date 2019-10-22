@@ -19,14 +19,13 @@
 #include "StaticFileRouter.h"
 #include "HttpAppFrameworkImpl.h"
 #include "FiltersFunction.h"
+#include <algorithm>
 
 using namespace drogon;
 
 void HttpControllersRouter::doWhenNoHandlerFound(
     const HttpRequestImplPtr &req,
-    std::function<void(const HttpResponsePtr &)> &&callback,
-    bool needSetJsessionid,
-    std::string &&sessionId)
+    std::function<void(const HttpResponsePtr &)> &&callback)
 {
     if (req->path() == "/" &&
         !HttpAppFrameworkImpl::instance().getHomePage().empty())
@@ -35,10 +34,7 @@ void HttpControllersRouter::doWhenNoHandlerFound(
         HttpAppFrameworkImpl::instance().forward(req, std::move(callback));
         return;
     }
-    _fileRouter.route(req,
-                      std::move(callback),
-                      needSetJsessionid,
-                      std::move(sessionId));
+    _fileRouter.route(req, std::move(callback));
 }
 
 void HttpControllersRouter::init(
@@ -59,11 +55,6 @@ void HttpControllersRouter::init(
             {
                 binder->_filters =
                     filters_function::createFilters(binder->_filterNames);
-                for (auto ioloop : ioLoops)
-                {
-                    binder->_responsePtrMap[ioloop] =
-                        std::shared_ptr<HttpResponse>();
-                }
             }
         }
     }
@@ -108,48 +99,202 @@ void HttpControllersRouter::addHttpPath(
     std::vector<size_t> places;
     std::string tmpPath = path;
     std::string paras = "";
-    std::regex regex = std::regex("\\{([0-9]+)\\}");
+    std::regex regex = std::regex("\\{([^/]*)\\}");
     std::smatch results;
-    auto pos = tmpPath.find("?");
+    auto pos = tmpPath.find('?');
     if (pos != std::string::npos)
     {
         paras = tmpPath.substr(pos + 1);
         tmpPath = tmpPath.substr(0, pos);
     }
     std::string originPath = tmpPath;
+    size_t placeIndex = 1;
     while (std::regex_search(tmpPath, results, regex))
     {
         if (results.size() > 1)
         {
-            size_t place = (size_t)std::stoi(results[1].str());
-            if (place > binder->paramCount() || place == 0)
+            auto result = results[1].str();
+            if (!result.empty() &&
+                std::all_of(result.begin(), result.end(), [](const char c) {
+                    return std::isdigit(c);
+                }))
             {
-                LOG_ERROR << "parameter placeholder(value=" << place
-                          << ") out of range (1 to " << binder->paramCount()
-                          << ")";
-                exit(0);
+                size_t place = (size_t)std::stoi(result);
+                if (place > binder->paramCount() || place == 0)
+                {
+                    LOG_ERROR << "Parameter placeholder(value=" << place
+                              << ") out of range (1 to " << binder->paramCount()
+                              << ")";
+                    LOG_ERROR << "Path pattern: " << path;
+                    exit(1);
+                }
+                if (!std::all_of(places.begin(),
+                                 places.end(),
+                                 [place](size_t i) { return i != place; }))
+                {
+                    LOG_ERROR << "Parameter placeholders are duplicated: index="
+                              << place;
+                    LOG_ERROR << "Path pattern: " << path;
+                    exit(1);
+                }
+                places.push_back(place);
             }
-            places.push_back(place);
+            else
+            {
+                std::regex regNumberAndName("([0-9]+):.*");
+                std::smatch regexResult;
+                if (std::regex_match(result, regexResult, regNumberAndName))
+                {
+                    assert(regexResult.size() == 2 && regexResult[1].matched);
+                    auto num = regexResult[1].str();
+                    size_t place = (size_t)std::stoi(num);
+                    if (place > binder->paramCount() || place == 0)
+                    {
+                        LOG_ERROR << "Parameter placeholder(value=" << place
+                                  << ") out of range (1 to "
+                                  << binder->paramCount() << ")";
+                        LOG_ERROR << "Path pattern: " << path;
+                        exit(1);
+                    }
+                    if (!std::all_of(places.begin(),
+                                     places.end(),
+                                     [place](size_t i) { return i != place; }))
+                    {
+                        LOG_ERROR
+                            << "Parameter placeholders are duplicated: index="
+                            << place;
+                        LOG_ERROR << "Path pattern: " << path;
+                        exit(1);
+                    }
+                    places.push_back(place);
+                }
+                else
+                {
+                    if (!std::all_of(places.begin(),
+                                     places.end(),
+                                     [placeIndex](size_t i) {
+                                         return i != placeIndex;
+                                     }))
+                    {
+                        LOG_ERROR
+                            << "Parameter placeholders are duplicated: index="
+                            << placeIndex;
+                        LOG_ERROR << "Path pattern: " << path;
+                        exit(1);
+                    }
+                    places.push_back(placeIndex);
+                }
+            }
+            ++placeIndex;
         }
         tmpPath = results.suffix();
     }
     std::map<std::string, size_t> parametersPlaces;
     if (!paras.empty())
     {
-        std::regex pregex("([^&]*)=\\{([0-9]+)\\}&*");
+        std::regex pregex("([^&]*)=\\{([^&]*)\\}&*");
         while (std::regex_search(paras, results, pregex))
         {
             if (results.size() > 2)
             {
-                size_t place = (size_t)std::stoi(results[2].str());
-                if (place > binder->paramCount() || place == 0)
+                auto result = results[2].str();
+                if (!result.empty() &&
+                    std::all_of(result.begin(), result.end(), [](const char c) {
+                        return std::isdigit(c);
+                    }))
                 {
-                    LOG_ERROR << "parameter placeholder(value=" << place
-                              << ") out of range (1 to " << binder->paramCount()
-                              << ")";
-                    exit(0);
+                    size_t place = (size_t)std::stoi(result);
+                    if (place > binder->paramCount() || place == 0)
+                    {
+                        LOG_ERROR << "Parameter placeholder(value=" << place
+                                  << ") out of range (1 to "
+                                  << binder->paramCount() << ")";
+                        LOG_ERROR << "Path pattern: " << path;
+                        exit(1);
+                    }
+                    if (!std::all_of(places.begin(),
+                                     places.end(),
+                                     [place](size_t i) {
+                                         return i != place;
+                                     }) ||
+                        !all_of(parametersPlaces.begin(),
+                                parametersPlaces.end(),
+                                [place](const std::pair<std::string, size_t>
+                                            &item) {
+                                    return item.second != place;
+                                }))
+                    {
+                        LOG_ERROR << "Parameter placeholders are "
+                                     "duplicated: index="
+                                  << place;
+                        LOG_ERROR << "Path pattern: " << path;
+                        exit(1);
+                    }
+                    parametersPlaces[results[1].str()] = place;
                 }
-                parametersPlaces[results[1].str()] = place;
+                else
+                {
+                    std::regex regNumberAndName("([0-9]+):.*");
+                    std::smatch regexResult;
+                    if (std::regex_match(result, regexResult, regNumberAndName))
+                    {
+                        assert(regexResult.size() == 2 &&
+                               regexResult[1].matched);
+                        auto num = regexResult[1].str();
+                        size_t place = (size_t)std::stoi(num);
+                        if (place > binder->paramCount() || place == 0)
+                        {
+                            LOG_ERROR << "Parameter placeholder(value=" << place
+                                      << ") out of range (1 to "
+                                      << binder->paramCount() << ")";
+                            LOG_ERROR << "Path pattern: " << path;
+                            exit(1);
+                        }
+                        if (!std::all_of(places.begin(),
+                                         places.end(),
+                                         [place](size_t i) {
+                                             return i != place;
+                                         }) ||
+                            !all_of(parametersPlaces.begin(),
+                                    parametersPlaces.end(),
+                                    [place](const std::pair<std::string, size_t>
+                                                &item) {
+                                        return item.second != place;
+                                    }))
+                        {
+                            LOG_ERROR << "Parameter placeholders are "
+                                         "duplicated: index="
+                                      << place;
+                            LOG_ERROR << "Path pattern: " << path;
+                            exit(1);
+                        }
+                        parametersPlaces[results[1].str()] = place;
+                    }
+                    else
+                    {
+                        if (!std::all_of(places.begin(),
+                                         places.end(),
+                                         [placeIndex](size_t i) {
+                                             return i != placeIndex;
+                                         }) ||
+                            !all_of(parametersPlaces.begin(),
+                                    parametersPlaces.end(),
+                                    [placeIndex](
+                                        const std::pair<std::string, size_t>
+                                            &item) {
+                                        return item.second != placeIndex;
+                                    }))
+                        {
+                            LOG_ERROR << "Parameter placeholders are "
+                                         "duplicated: index="
+                                      << placeIndex;
+                            LOG_ERROR << "Path pattern: " << path;
+                            exit(1);
+                        }
+                        parametersPlaces[results[1].str()] = placeIndex;
+                    }
+                }
+                ++placeIndex;
             }
             paras = results.suffix();
         }
@@ -162,6 +307,10 @@ void HttpControllersRouter::addHttpPath(
     binderInfo->_binderPtr = binder;
     binderInfo->_parameterPlaces = std::move(places);
     binderInfo->_queryParametersPlaces = std::move(parametersPlaces);
+    drogon::app().getLoop()->queueInLoop([binderInfo]() {
+        // Recreate this with the correct number of threads.
+        binderInfo->_responseCache = IOThreadStorage<HttpResponsePtr>();
+    });
     {
         std::lock_guard<std::mutex> guard(_ctrlMutex);
         for (auto &router : _ctrlVector)
@@ -213,9 +362,7 @@ void HttpControllersRouter::addHttpPath(
 
 void HttpControllersRouter::route(
     const HttpRequestImplPtr &req,
-    std::function<void(const HttpResponsePtr &)> &&callback,
-    bool needSetJsessionid,
-    std::string &&sessionId)
+    std::function<void(const HttpResponsePtr &)> &&callback)
 {
     // Find http controller
     if (_ctrlRegex.mark_count() > 0)
@@ -263,8 +410,6 @@ void HttpControllersRouter::route(
                         if (!binder->_filters.empty())
                         {
                             auto &filters = binder->_filters;
-                            auto sessionIdPtr = std::make_shared<std::string>(
-                                std::move(sessionId));
                             auto callbackPtr = std::make_shared<
                                 std::function<void(const HttpResponsePtr &)>>(
                                 std::move(callback));
@@ -272,16 +417,12 @@ void HttpControllersRouter::route(
                                 filters,
                                 req,
                                 callbackPtr,
-                                needSetJsessionid,
-                                sessionIdPtr,
                                 [=, &binder, &routerItem]() {
-                                    doPreHandlingAdvices(
-                                        binder,
-                                        routerItem,
-                                        req,
-                                        std::move(*callbackPtr),
-                                        needSetJsessionid,
-                                        std::move(*sessionIdPtr));
+                                    doPreHandlingAdvices(binder,
+                                                         routerItem,
+                                                         req,
+                                                         std::move(
+                                                             *callbackPtr));
                                 });
                         }
                         else
@@ -289,9 +430,7 @@ void HttpControllersRouter::route(
                             doPreHandlingAdvices(binder,
                                                  routerItem,
                                                  req,
-                                                 std::move(callback),
-                                                 needSetJsessionid,
-                                                 std::move(sessionId));
+                                                 std::move(callback));
                         }
                     }
                     else
@@ -299,51 +438,40 @@ void HttpControllersRouter::route(
                         auto callbackPtr = std::make_shared<
                             std::function<void(const HttpResponsePtr &)>>(
                             std::move(callback));
-                        doAdvicesChain(
-                            _postRoutingAdvices,
-                            0,
-                            req,
-                            callbackPtr,
-                            [&binder,
-                             sessionId = std::move(sessionId),
-                             callbackPtr,
-                             req,
-                             needSetJsessionid,
-                             this,
-                             &routerItem]() mutable {
-                                if (!binder->_filters.empty())
-                                {
-                                    auto &filters = binder->_filters;
-                                    auto sessionIdPtr =
-                                        std::make_shared<std::string>(
-                                            std::move(sessionId));
-                                    filters_function::doFilters(
-                                        filters,
-                                        req,
+                        doAdvicesChain(_postRoutingAdvices,
+                                       0,
+                                       req,
+                                       callbackPtr,
+                                       [&binder,
                                         callbackPtr,
-                                        needSetJsessionid,
-                                        sessionIdPtr,
-                                        [=, &binder, &routerItem]() {
-                                            doPreHandlingAdvices(
-                                                binder,
-                                                routerItem,
-                                                req,
-                                                std::move(*callbackPtr),
-                                                needSetJsessionid,
-                                                std::move(*sessionIdPtr));
-                                        });
-                                }
-                                else
-                                {
-                                    doPreHandlingAdvices(binder,
-                                                         routerItem,
-                                                         req,
-                                                         std::move(
-                                                             *callbackPtr),
-                                                         needSetJsessionid,
-                                                         std::move(sessionId));
-                                }
-                            });
+                                        req,
+                                        this,
+                                        &routerItem]() mutable {
+                                           if (!binder->_filters.empty())
+                                           {
+                                               auto &filters = binder->_filters;
+                                               filters_function::doFilters(
+                                                   filters,
+                                                   req,
+                                                   callbackPtr,
+                                                   [=, &binder, &routerItem]() {
+                                                       doPreHandlingAdvices(
+                                                           binder,
+                                                           routerItem,
+                                                           req,
+                                                           std::move(
+                                                               *callbackPtr));
+                                                   });
+                                           }
+                                           else
+                                           {
+                                               doPreHandlingAdvices(
+                                                   binder,
+                                                   routerItem,
+                                                   req,
+                                                   std::move(*callbackPtr));
+                                           }
+                                       });
                     }
                 }
             }
@@ -351,19 +479,13 @@ void HttpControllersRouter::route(
         else
         {
             // No handler found
-            doWhenNoHandlerFound(req,
-                                 std::move(callback),
-                                 needSetJsessionid,
-                                 std::move(sessionId));
+            doWhenNoHandlerFound(req, std::move(callback));
         }
     }
     else
     {
         // No handler found
-        doWhenNoHandlerFound(req,
-                             std::move(callback),
-                             needSetJsessionid,
-                             std::move(sessionId));
+        doWhenNoHandlerFound(req, std::move(callback));
     }
 }
 
@@ -371,32 +493,24 @@ void HttpControllersRouter::doControllerHandler(
     const CtrlBinderPtr &ctrlBinderPtr,
     const HttpControllerRouterItem &routerItem,
     const HttpRequestImplPtr &req,
-    std::function<void(const HttpResponsePtr &)> &&callback,
-    bool needSetJsessionid,
-    std::string &&sessionId)
+    std::function<void(const HttpResponsePtr &)> &&callback)
 {
-    HttpResponsePtr &responsePtr =
-        ctrlBinderPtr->_responsePtrMap[req->getLoop()];
-    if (responsePtr &&
-        (responsePtr->expiredTime() == 0 ||
-         (trantor::Date::now() <
-          responsePtr->creationDate().after(responsePtr->expiredTime()))))
+    auto &responsePtr = *(ctrlBinderPtr->_responseCache);
+    if (responsePtr)
     {
-        // use cached response!
-        LOG_TRACE << "Use cached response";
-
-        if (!needSetJsessionid || responsePtr->statusCode() == k404NotFound)
+        if (responsePtr->expiredTime() == 0 ||
+            (trantor::Date::now() <
+             responsePtr->creationDate().after(responsePtr->expiredTime())))
+        {
+            // use cached response!
+            LOG_TRACE << "Use cached response";
             invokeCallback(callback, req, responsePtr);
+            return;
+        }
         else
         {
-            // make a copy response;
-            auto newResp = std::make_shared<HttpResponseImpl>(
-                *static_cast<HttpResponseImpl *>(responsePtr.get()));
-            newResp->setExpiredTime(-1);  // make it temporary
-            newResp->addCookie("JSESSIONID", sessionId);
-            invokeCallback(callback, req, newResp);
+            responsePtr.reset();
         }
-        return;
     }
 
     std::vector<std::string> params(ctrlBinderPtr->_parameterPlaces.size());
@@ -438,39 +552,24 @@ void HttpControllersRouter::doControllerHandler(
     ctrlBinderPtr->_binderPtr->handleHttpRequest(
         paraList,
         req,
-        [=, callback = std::move(callback), sessionId = std::move(sessionId)](
-            const HttpResponsePtr &resp) {
-            LOG_TRACE << "http resp:needSetJsessionid=" << needSetJsessionid
-                      << ";JSESSIONID=" << sessionId;
-            auto newResp = resp;
-            if (resp->expiredTime() >= 0)
+        [=, callback = std::move(callback)](const HttpResponsePtr &resp) {
+            if (resp->expiredTime() >= 0 && resp->statusCode() != k404NotFound)
             {
                 // cache the response;
                 static_cast<HttpResponseImpl *>(resp.get())->makeHeaderString();
                 auto loop = req->getLoop();
                 if (loop->isInLoopThread())
                 {
-                    ctrlBinderPtr->_responsePtrMap[loop] = resp;
+                    ctrlBinderPtr->_responseCache.setThreadData(resp);
                 }
                 else
                 {
-                    req->getLoop()->queueInLoop([loop, resp, ctrlBinderPtr]() {
-                        ctrlBinderPtr->_responsePtrMap[loop] = resp;
+                    req->getLoop()->queueInLoop([resp, &ctrlBinderPtr]() {
+                        ctrlBinderPtr->_responseCache.setThreadData(resp);
                     });
                 }
             }
-            if (needSetJsessionid && resp->statusCode() != k404NotFound)
-            {
-                if (resp->expiredTime() >= 0)
-                {
-                    // make a copy
-                    newResp = std::make_shared<HttpResponseImpl>(
-                        *static_cast<HttpResponseImpl *>(resp.get()));
-                    newResp->setExpiredTime(-1);  // make it temporary
-                }
-                newResp->addCookie("JSESSIONID", sessionId);
-            }
-            invokeCallback(callback, req, newResp);
+            invokeCallback(callback, req, resp);
         });
     return;
 }
@@ -479,9 +578,7 @@ void HttpControllersRouter::doPreHandlingAdvices(
     const CtrlBinderPtr &ctrlBinderPtr,
     const HttpControllerRouterItem &routerItem,
     const HttpRequestImplPtr &req,
-    std::function<void(const HttpResponsePtr &)> &&callback,
-    bool needSetJsessionid,
-    std::string &&sessionId)
+    std::function<void(const HttpResponsePtr &)> &&callback)
 {
     if (req->method() == Options)
     {
@@ -533,45 +630,28 @@ void HttpControllersRouter::doPreHandlingAdvices(
         doControllerHandler(ctrlBinderPtr,
                             routerItem,
                             req,
-                            std::move(callback),
-                            needSetJsessionid,
-                            std::move(sessionId));
+                            std::move(callback));
     }
     else
     {
         auto callbackPtr =
             std::make_shared<std::function<void(const HttpResponsePtr &)>>(
                 std::move(callback));
-        auto sessionIdPtr = std::make_shared<std::string>(std::move(sessionId));
         doAdvicesChain(
             _preHandlingAdvices,
             0,
             req,
             std::make_shared<std::function<void(const HttpResponsePtr &)>>(
-                [callbackPtr, needSetJsessionid, sessionIdPtr](
-                    const HttpResponsePtr &resp) {
-                    if (!needSetJsessionid ||
-                        resp->statusCode() == k404NotFound)
-                        (*callbackPtr)(resp);
-                    else
-                    {
-                        resp->addCookie("JSESSIONID", *sessionIdPtr);
-                        (*callbackPtr)(resp);
-                    }
+                [req, callbackPtr](const HttpResponsePtr &resp) {
+                    HttpAppFrameworkImpl::instance().callCallback(req,
+                                                                  resp,
+                                                                  *callbackPtr);
                 }),
-            [this,
-             ctrlBinderPtr,
-             &routerItem,
-             req,
-             callbackPtr,
-             needSetJsessionid,
-             sessionIdPtr]() {
+            [this, ctrlBinderPtr, &routerItem, req, callbackPtr]() {
                 doControllerHandler(ctrlBinderPtr,
                                     routerItem,
                                     req,
-                                    std::move(*callbackPtr),
-                                    needSetJsessionid,
-                                    std::move(*sessionIdPtr));
+                                    std::move(*callbackPtr));
             });
     }
 }
@@ -585,5 +665,5 @@ void HttpControllersRouter::invokeCallback(
     {
         advice(req, resp);
     }
-    callback(resp);
+    HttpAppFrameworkImpl::instance().callCallback(req, resp, callback);
 }

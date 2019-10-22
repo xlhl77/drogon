@@ -12,18 +12,19 @@
  *
  */
 
+/// The classes in the file are internal tool classes. Do not include this
+/// file directly and use any of these classes directly.
+
 #pragma once
 
 #include <drogon/DrClassMap.h>
 #include <drogon/DrObject.h>
 #include <drogon/utils/FunctionTraits.h>
+#include <drogon/HttpRequest.h>
 #include <list>
 #include <memory>
 #include <sstream>
 #include <string>
-
-/// The classes in the file are internal tool classes. Do not include this
-/// file directly and use any of these classes directly.
 
 namespace drogon
 {
@@ -129,14 +130,42 @@ class HttpBinder : public HttpBinderBase
 
     static const size_t argument_count = traits::arity;
     std::string _handlerName;
+
     template <typename T>
-    void getHandlerArgumentValue(T &value, std::string &&p)
+    struct CanConvertFromStringStream
+    {
+      private:
+        typedef std::true_type yes;
+        typedef std::false_type no;
+
+        template <typename U>
+        static auto test(U *p, std::stringstream &&ss)
+            -> decltype((ss >> *p), yes());
+
+        template <typename>
+        static no test(...);
+
+      public:
+        static constexpr bool value =
+            std::is_same<decltype(test<T>(nullptr, std::stringstream())),
+                         yes>::value;
+    };
+
+    template <typename T>
+    typename std::enable_if<CanConvertFromStringStream<T>::value, void>::type
+    getHandlerArgumentValue(T &value, std::string &&p)
     {
         if (!p.empty())
         {
             std::stringstream ss(std::move(p));
             ss >> value;
         }
+    }
+
+    template <typename T>
+    typename std::enable_if<!(CanConvertFromStringStream<T>::value), void>::type
+    getHandlerArgumentValue(T &value, std::string &&p)
+    {
     }
 
     void getHandlerArgumentValue(std::string &value, std::string &&p)
@@ -214,6 +243,18 @@ class HttpBinder : public HttpBinderBase
                           << sizeof...(Values) + 1 << "th argument";
             }
         }
+        else
+        {
+            try
+            {
+                value = req->as<ValueType>();
+            }
+            catch (const std::exception &)
+            {
+                LOG_ERROR << "Error converting HttpRequest to the "
+                          << sizeof...(Values) + 1 << "th argument";
+            }
+        }
 
         run(pathArguments,
             req,
@@ -223,7 +264,7 @@ class HttpBinder : public HttpBinderBase
     }
     template <typename... Values, std::size_t Boundary = argument_count>
     typename std::enable_if<(sizeof...(Values) == Boundary), void>::type run(
-        std::list<std::string> &pathArguments,
+        std::list<std::string> &,
         const HttpRequestPtr &req,
         std::function<void(const HttpResponsePtr &)> &&callback,
         Values &&... values)
@@ -232,8 +273,11 @@ class HttpBinder : public HttpBinderBase
     }
     template <typename... Values,
               bool isClassFunction = traits::isClassFunction,
-              bool isDrObjectClass = traits::isDrObjectClass>
-    typename std::enable_if<isClassFunction && !isDrObjectClass, void>::type
+              bool isDrObjectClass = traits::isDrObjectClass,
+              bool isNormal = std::is_same<typename traits::first_param_type,
+                                           HttpRequestPtr>::value>
+    typename std::enable_if<isClassFunction && !isDrObjectClass && isNormal,
+                            void>::type
     callFunction(const HttpRequestPtr &req,
                  std::function<void(const HttpResponsePtr &)> &&callback,
                  Values &&... values)
@@ -243,8 +287,11 @@ class HttpBinder : public HttpBinderBase
     }
     template <typename... Values,
               bool isClassFunction = traits::isClassFunction,
-              bool isDrObjectClass = traits::isDrObjectClass>
-    typename std::enable_if<isClassFunction && isDrObjectClass, void>::type
+              bool isDrObjectClass = traits::isDrObjectClass,
+              bool isNormal = std::is_same<typename traits::first_param_type,
+                                           HttpRequestPtr>::value>
+    typename std::enable_if<isClassFunction && isDrObjectClass && isNormal,
+                            void>::type
     callFunction(const HttpRequestPtr &req,
                  std::function<void(const HttpResponsePtr &)> &&callback,
                  Values &&... values)
@@ -254,14 +301,58 @@ class HttpBinder : public HttpBinderBase
         (*objPtr.*_func)(req, std::move(callback), std::move(values)...);
     }
     template <typename... Values,
-              bool isClassFunction = traits::isClassFunction>
-    typename std::enable_if<!isClassFunction, void>::type callFunction(
-        const HttpRequestPtr &req,
-        std::function<void(const HttpResponsePtr &)> &&callback,
-        Values &&... values)
+              bool isClassFunction = traits::isClassFunction,
+              bool isNormal = std::is_same<typename traits::first_param_type,
+                                           HttpRequestPtr>::value>
+    typename std::enable_if<!isClassFunction && isNormal, void>::type
+    callFunction(const HttpRequestPtr &req,
+                 std::function<void(const HttpResponsePtr &)> &&callback,
+                 Values &&... values)
     {
         _func(req, std::move(callback), std::move(values)...);
     }
+    ////////////////////////////////////////////////////////////////
+    template <typename... Values,
+              bool isClassFunction = traits::isClassFunction,
+              bool isDrObjectClass = traits::isDrObjectClass,
+              bool isNormal = std::is_same<typename traits::first_param_type,
+                                           HttpRequestPtr>::value>
+    typename std::enable_if<isClassFunction && !isDrObjectClass && !isNormal,
+                            void>::type
+    callFunction(const HttpRequestPtr &req,
+                 std::function<void(const HttpResponsePtr &)> &&callback,
+                 Values &&... values)
+    {
+        static auto &obj = getControllerObj<typename traits::class_type>();
+        (obj.*_func)((*req), std::move(callback), std::move(values)...);
+    }
+    template <typename... Values,
+              bool isClassFunction = traits::isClassFunction,
+              bool isDrObjectClass = traits::isDrObjectClass,
+              bool isNormal = std::is_same<typename traits::first_param_type,
+                                           HttpRequestPtr>::value>
+    typename std::enable_if<isClassFunction && isDrObjectClass && !isNormal,
+                            void>::type
+    callFunction(const HttpRequestPtr &req,
+                 std::function<void(const HttpResponsePtr &)> &&callback,
+                 Values &&... values)
+    {
+        static auto objPtr =
+            DrClassMap::getSingleInstance<typename traits::class_type>();
+        (*objPtr.*_func)((*req), std::move(callback), std::move(values)...);
+    }
+    template <typename... Values,
+              bool isClassFunction = traits::isClassFunction,
+              bool isNormal = std::is_same<typename traits::first_param_type,
+                                           HttpRequestPtr>::value>
+    typename std::enable_if<!isClassFunction && !isNormal, void>::type
+    callFunction(const HttpRequestPtr &req,
+                 std::function<void(const HttpResponsePtr &)> &&callback,
+                 Values &&... values)
+    {
+        _func((*req), std::move(callback), std::move(values)...);
+    }
+    /////////////
 };
 
 }  // namespace internal

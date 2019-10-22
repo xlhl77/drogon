@@ -26,25 +26,29 @@
 
 using namespace drogon;
 
-void StaticFileRouter::init()
+void StaticFileRouter::init(const std::vector<trantor::EventLoop *> &ioloops)
 {
-    _responseCachingMap =
-        std::unique_ptr<CacheMap<std::string, HttpResponsePtr>>(
-            new CacheMap<std::string, HttpResponsePtr>(
-                HttpAppFrameworkImpl::instance().getLoop(),
-                1.0,
-                4,
-                50));  // Max timeout up to about 70 days;
+    // Max timeout up to about 70 days;
+    _staticFilesCacheMap = decltype(_staticFilesCacheMap)(
+        new IOThreadStorage<std::unique_ptr<CacheMap<std::string, char>>>);
+    _staticFilesCacheMap->init(
+        [&ioloops](std::unique_ptr<CacheMap<std::string, char>> &mapPtr,
+                   size_t i) {
+            assert(i == ioloops[i]->index());
+            mapPtr = std::unique_ptr<CacheMap<std::string, char>>(
+                new CacheMap<std::string, char>(ioloops[i], 1.0, 4, 50));
+        });
+    _staticFilesCache = decltype(_staticFilesCache)(
+        new IOThreadStorage<
+            std::unordered_map<std::string, HttpResponsePtr>>{});
 }
 
 void StaticFileRouter::route(
     const HttpRequestImplPtr &req,
-    std::function<void(const HttpResponsePtr &)> &&callback,
-    bool needSetJsessionid,
-    std::string &&sessionId)
+    std::function<void(const HttpResponsePtr &)> &&callback)
 {
     const std::string &path = req->path();
-    auto pos = path.rfind(".");
+    auto pos = path.rfind('.');
     if (pos != std::string::npos)
     {
         std::string filetype = path.substr(pos + 1);
@@ -64,16 +68,11 @@ void StaticFileRouter::route(
             }
             // find cached response
             HttpResponsePtr cachedResp;
+            auto &cacheMap = _staticFilesCache->getThreadData();
+            auto iter = cacheMap.find(filePath);
+            if (iter != cacheMap.end())
             {
-                std::lock_guard<std::mutex> guard(_staticFilesCacheMutex);
-                if (_staticFilesCache.find(filePath) != _staticFilesCache.end())
-                {
-                    cachedResp = _staticFilesCache[filePath].lock();
-                    if (!cachedResp)
-                    {
-                        _staticFilesCache.erase(filePath);
-                    }
-                }
+                cachedResp = iter->second;
             }
 
             // check last modified time,rfc2616-14.25
@@ -91,11 +90,9 @@ void StaticFileRouter::route(
                         std::shared_ptr<HttpResponseImpl> resp =
                             std::make_shared<HttpResponseImpl>();
                         resp->setStatusCode(k304NotModified);
-                        if (needSetJsessionid)
-                        {
-                            resp->addCookie("JSESSIONID", sessionId);
-                        }
-                        callback(resp);
+                        HttpAppFrameworkImpl::instance().callCallback(req,
+                                                                      resp,
+                                                                      callback);
                         return;
                     }
                 }
@@ -122,11 +119,8 @@ void StaticFileRouter::route(
                             std::shared_ptr<HttpResponseImpl> resp =
                                 std::make_shared<HttpResponseImpl>();
                             resp->setStatusCode(k304NotModified);
-                            if (needSetJsessionid)
-                            {
-                                resp->addCookie("JSESSIONID", sessionId);
-                            }
-                            callback(resp);
+                            HttpAppFrameworkImpl::instance().callCallback(
+                                req, resp, callback);
                             return;
                         }
                     }
@@ -135,17 +129,10 @@ void StaticFileRouter::route(
 
             if (cachedResp)
             {
-                if (needSetJsessionid)
-                {
-                    // make a copy
-                    auto newCachedResp = std::make_shared<HttpResponseImpl>(
-                        *static_cast<HttpResponseImpl *>(cachedResp.get()));
-                    newCachedResp->addCookie("JSESSIONID", sessionId);
-                    newCachedResp->setExpiredTime(-1);
-                    callback(newCachedResp);
-                    return;
-                }
-                callback(cachedResp);
+                LOG_TRACE << "Using file cache";
+                HttpAppFrameworkImpl::instance().callCallback(req,
+                                                              cachedResp,
+                                                              callback);
                 return;
             }
             HttpResponsePtr resp;
@@ -175,34 +162,23 @@ void StaticFileRouter::route(
                 // cache the response for 5 seconds by default
                 if (_staticFilesCacheTime >= 0)
                 {
+                    LOG_TRACE << "Save in cache for " << _staticFilesCacheTime
+                              << " seconds";
                     resp->setExpiredTime(_staticFilesCacheTime);
-                    _responseCachingMap->insert(
-                        filePath, resp, resp->expiredTime(), [=]() {
-                            std::lock_guard<std::mutex> guard(
-                                _staticFilesCacheMutex);
-                            _staticFilesCache.erase(filePath);
+                    _staticFilesCache->getThreadData()[filePath] = resp;
+                    _staticFilesCacheMap->getThreadData()->insert(
+                        filePath, 0, _staticFilesCacheTime, [this, filePath]() {
+                            LOG_TRACE << "Erase cache";
+                            assert(_staticFilesCache->getThreadData().find(
+                                       filePath) !=
+                                   _staticFilesCache->getThreadData().end());
+                            _staticFilesCache->getThreadData().erase(filePath);
                         });
-                    {
-                        std::lock_guard<std::mutex> guard(
-                            _staticFilesCacheMutex);
-                        _staticFilesCache[filePath] = resp;
-                    }
                 }
-
-                if (needSetJsessionid)
-                {
-                    auto newCachedResp = resp;
-                    if (resp->expiredTime() >= 0)
-                    {
-                        // make a copy
-                        newCachedResp = std::make_shared<HttpResponseImpl>(
-                            *static_cast<HttpResponseImpl *>(resp.get()));
-                        newCachedResp->setExpiredTime(-1);
-                    }
-                    newCachedResp->addCookie("JSESSIONID", sessionId);
-                    callback(newCachedResp);
-                    return;
-                }
+                HttpAppFrameworkImpl::instance().callCallback(req,
+                                                              resp,
+                                                              callback);
+                return;
             }
             callback(resp);
             return;
