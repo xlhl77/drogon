@@ -123,7 +123,7 @@ class Result
     /// Query that produced this result, if available (empty string otherwise)
     const std::string &sql() const noexcept;
 
-    bool toJson(json &result) noexcept;
+    bool toJson(json &result) const noexcept;
   private:
     ResultImplPtr _resultPtr;
 

@@ -99,7 +99,7 @@ class DbClient : public trantor::NonCopyable
      *
      */
     template <typename FUNCTION1, typename FUNCTION2, typename... Arguments>
-    void execSqlAsync(const std::string &sql,
+    void execSqlAsync(const std::string &dbName, const std::string &sql,
                       FUNCTION1 &&rCallback,
                       FUNCTION2 &&exceptCallback,
                       Arguments &&... args) noexcept
@@ -113,7 +113,7 @@ class DbClient : public trantor::NonCopyable
 
     /// Async and nonblocking method
     template <typename... Arguments>
-    std::future<const Result> execSqlAsyncFuture(const std::string &sql,
+    std::future<const Result> execSqlAsyncFuture(const std::string &dbName, const std::string &sql,
                                                  Arguments &&... args) noexcept
     {
         auto binder = *this << sql;
@@ -123,13 +123,13 @@ class DbClient : public trantor::NonCopyable
             std::make_shared<std::promise<const Result>>();
         binder >> [=](const Result &r) { prom->set_value(r); };
         binder >> [=](const std::exception_ptr &e) { prom->set_exception(e); };
-        binder.exec();
+        binder.exec(dbName);
         return prom->get_future();
     }
 
     // Sync and blocking method
     template <typename... Arguments>
-    const Result execSqlSync(const std::string &sql,
+    const Result execSqlSync(const std::string &dbName, const std::string &sql,
                              Arguments &&... args) noexcept(false)
     {
         Result r(nullptr);
@@ -141,7 +141,7 @@ class DbClient : public trantor::NonCopyable
             binder << Mode::Blocking;
 
             binder >> [&r](const Result &result) { r = result; };
-            binder.exec();  // exec may be throw exception;
+            binder.exec(dbName);  // exec may be throw exception;
         }
         return r;
     }
@@ -183,6 +183,7 @@ class DbClient : public trantor::NonCopyable
   private:
     friend internal::SqlBinder;
     virtual void execSql(
+        const std::string &dbName,
         std::string &&sql,
         size_t paraNum,
         std::vector<const char *> &&parameters,

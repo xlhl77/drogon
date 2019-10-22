@@ -46,6 +46,7 @@ enum ConnectStatus
 
 struct SqlCmd
 {
+    std::string _dbName;
     std::string _sql;
     size_t _paraNum;
     std::vector<const char *> _parameters;
@@ -54,14 +55,16 @@ struct SqlCmd
     QueryCallback _cb;
     ExceptPtrCallback _exceptCb;
     std::string _preparingStatement;
-    SqlCmd(std::string &&sql,
+    SqlCmd(const std::string &dbName,
+           std::string &&sql,
            const size_t paraNum,
            std::vector<const char *> &&parameters,
            std::vector<int> &&length,
            std::vector<int> &&format,
            QueryCallback &&cb,
            ExceptPtrCallback &&exceptCb)
-        : _sql(std::move(sql)),
+        : _dbName(dbName),
+          _sql(std::move(sql)),
           _paraNum(paraNum),
           _parameters(std::move(parameters)),
           _length(std::move(length)),
@@ -93,7 +96,14 @@ class DbConnection : public trantor::NonCopyable
     {
         _idleCb = cb;
     }
+    // 切换数据库, 默认为空实现，子类可以选择是否实现
+    virtual bool changeDb(const std::string &dbName)
+    {
+        LOG_ERROR << "unimplented changeDb.\n";
+        return false;
+    }
     virtual void execSql(
+        const std::string &dbName,
         std::string &&sql,
         size_t paraNum,
         std::vector<const char *> &&parameters,

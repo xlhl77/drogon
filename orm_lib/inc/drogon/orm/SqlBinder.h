@@ -387,7 +387,7 @@ class SqlBinder
         return *this;
     }
 
-    void exec() noexcept(false);
+    void exec(const std::string &dbName) noexcept(false);
 
   private:
     int getMysqlTypeBySize(size_t size);

@@ -41,7 +41,8 @@ class TransactionImpl : public Transaction,
 
   private:
     DbConnectionPtr _connectionPtr;
-    virtual void execSql(std::string &&sql,
+    virtual void execSql(const std::string &dbName,
+                         std::string &&sql,
                          size_t paraNum,
                          std::vector<const char *> &&parameters,
                          std::vector<int> &&length,
@@ -52,7 +53,8 @@ class TransactionImpl : public Transaction,
     {
         if (_loop->isInLoopThread())
         {
-            execSqlInLoop(std::move(sql),
+            execSqlInLoop(dbName,
+                          std::move(sql),
                           paraNum,
                           std::move(parameters),
                           std::move(length),
@@ -64,6 +66,7 @@ class TransactionImpl : public Transaction,
         {
             _loop->queueInLoop(
                 [thisPtr = shared_from_this(),
+                 dbName,
                  sql = std::move(sql),
                  paraNum,
                  parameters = std::move(parameters),
@@ -71,7 +74,8 @@ class TransactionImpl : public Transaction,
                  format = std::move(format),
                  rcb = std::move(rcb),
                  exceptCallback = std::move(exceptCallback)]() mutable {
-                    thisPtr->execSqlInLoop(std::move(sql),
+                    thisPtr->execSqlInLoop(dbName,
+                                           std::move(sql),
                                            paraNum,
                                            std::move(parameters),
                                            std::move(length),
@@ -83,6 +87,7 @@ class TransactionImpl : public Transaction,
     }
 
     void execSqlInLoop(
+        const std::string &dbName,
         std::string &&sql,
         size_t paraNum,
         std::vector<const char *> &&parameters,
@@ -108,6 +113,7 @@ class TransactionImpl : public Transaction,
     void execNewTask();
     struct SqlCmd
     {
+        std::string _dbName;
         std::string _sql;
         size_t _paraNum;
         std::vector<const char *> _parameters;

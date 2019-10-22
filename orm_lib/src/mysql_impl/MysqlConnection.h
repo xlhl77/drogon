@@ -40,7 +40,9 @@ class MysqlConnection : public DbConnection,
     ~MysqlConnection()
     {
     }
-    virtual void execSql(std::string &&sql,
+    virtual bool changeDb(const std::string &dbName) override;
+    virtual void execSql(const std::string &name,
+                         std::string &&sql,
                          size_t paraNum,
                          std::vector<const char *> &&parameters,
                          std::vector<int> &&length,
@@ -51,7 +53,9 @@ class MysqlConnection : public DbConnection,
     {
         if (_loop->isInLoopThread())
         {
-            execSqlInLoop(std::move(sql),
+            LOG_TRACE << "exec sql inloop\n";
+            execSqlInLoop(name,
+                          std::move(sql),
                           paraNum,
                           std::move(parameters),
                           std::move(length),
@@ -61,9 +65,11 @@ class MysqlConnection : public DbConnection,
         }
         else
         {
+            LOG_TRACE << "put sql in queue\n";
             auto thisPtr = shared_from_this();
             _loop->queueInLoop(
                 [thisPtr,
+                 dbname = name,
                  sql = std::move(sql),
                  paraNum,
                  parameters = std::move(parameters),
@@ -71,7 +77,8 @@ class MysqlConnection : public DbConnection,
                  format = std::move(format),
                  rcb = std::move(rcb),
                  exceptCallback = std::move(exceptCallback)]() mutable {
-                    thisPtr->execSqlInLoop(std::move(sql),
+                    thisPtr->execSqlInLoop(dbname,
+                                           std::move(sql),
                                            paraNum,
                                            std::move(parameters),
                                            std::move(length),
@@ -90,7 +97,8 @@ class MysqlConnection : public DbConnection,
     virtual void disconnect() override;
 
   private:
-    void execSqlInLoop(std::string &&sql,
+    void execSqlInLoop(const std::string &name,
+                       std::string &&sql,
                        size_t paraNum,
                        std::vector<const char *> &&parameters,
                        std::vector<int> &&length,
@@ -136,7 +144,9 @@ class MysqlConnection : public DbConnection,
     void outputError();
     std::array<MYSQL_BIND, 64> _binds;
     std::shared_ptr<MysqlResultImpl> _resultPtr = nullptr;
-
+    std::string dbUser;
+    std::string dbPwd;
+    std::string dbName;
 };
 
 }  // namespace orm

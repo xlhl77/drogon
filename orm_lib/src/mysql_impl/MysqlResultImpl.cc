@@ -187,7 +187,7 @@ MYSQL_BIND *MysqlResultImpl::addRow()
 		case MYSQL_TYPE_STRING:
         {
 			row[name] = std::string(_fieldArray[i].length,'\0');
-            bind[i].buffer = (char *) (row[name].get_ptr<JSON::string_t*>())->c_str();
+            bind[i].buffer = (char *) (row[name].get_ptr<JSON::string_t*>())->data();
             break;
         }
 		case MYSQL_TYPE_GEOMETRY:

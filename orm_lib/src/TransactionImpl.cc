@@ -44,6 +44,7 @@ TransactionImpl::~TransactionImpl()
                     ucb();
             });
             conn->execSql(
+                "",
                 "commit",
                 0,
                 std::vector<const char *>(),
@@ -82,6 +83,7 @@ TransactionImpl::~TransactionImpl()
     }
 }
 void TransactionImpl::execSqlInLoop(
+    const std::string &dbName,
     std::string &&sql,
     size_t paraNum,
     std::vector<const char *> &&parameters,
@@ -98,7 +100,8 @@ void TransactionImpl::execSqlInLoop(
         {
             _isWorking = true;
             _thisPtr = thisPtr;
-            _connectionPtr->execSql(std::move(sql),
+            _connectionPtr->execSql(dbName,
+                                    std::move(sql),
                                     paraNum,
                                     std::move(parameters),
                                     std::move(length),
@@ -115,6 +118,7 @@ void TransactionImpl::execSqlInLoop(
         {
             // push sql cmd to buffer;
             SqlCmd cmd;
+            cmd._dbName = dbName;
             cmd._sql = std::move(sql);
             cmd._paraNum = paraNum;
             cmd._parameters = std::move(parameters);
@@ -171,6 +175,7 @@ void TransactionImpl::rollback()
         thisPtr->_isWorking = true;
         thisPtr->_thisPtr = thisPtr;
         thisPtr->_connectionPtr->execSql(
+            "",
             "rollback",
             0,
             std::vector<const char *>(),
@@ -203,6 +208,7 @@ void TransactionImpl::execNewTask()
             _sqlCmdBuffer.pop_front();
             auto conn = _connectionPtr;
             conn->execSql(
+                cmd._dbName,
                 std::move(cmd._sql),
                 cmd._paraNum,
                 std::move(cmd._parameters),
@@ -274,6 +280,7 @@ void TransactionImpl::doBegin()
         thisPtr->_isWorking = true;
         thisPtr->_thisPtr = thisPtr;
         thisPtr->_connectionPtr->execSql(
+            "",
             "begin",
             0,
             std::vector<const char *>(),

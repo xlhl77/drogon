@@ -23,7 +23,7 @@
 #endif
 using namespace drogon::orm;
 using namespace drogon::orm::internal;
-void SqlBinder::exec()
+void SqlBinder::exec(const std::string &dbName)
 {
     _execed = true;
     if (_mode == Mode::NonBlocking)
@@ -31,6 +31,7 @@ void SqlBinder::exec()
         // nonblocking mode,default mode
         // Retain shared_ptrs of parameters until we get the result;
         _client.execSql(
+            dbName,
             std::move(_sql),
             _paraNum,
             std::move(_parameters),
@@ -76,6 +77,7 @@ void SqlBinder::exec()
         auto f = pro->get_future();
 
         _client.execSql(
+            dbName,
             std::move(_sql),
             _paraNum,
             std::move(_parameters),
@@ -125,7 +127,8 @@ SqlBinder::~SqlBinder()
     _destructed = true;
     if (!_execed)
     {
-        exec();
+        LOG_ERROR << "You must call exec method explictly.\n";
+        // exec("");
     }
 }
 

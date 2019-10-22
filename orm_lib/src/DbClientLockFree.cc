@@ -77,6 +77,7 @@ DbClientLockFree::~DbClientLockFree() noexcept
 }
 
 void DbClientLockFree::execSql(
+    const std::string &dbName,
     std::string &&sql,
     size_t paraNum,
     std::vector<const char *> &&parameters,
@@ -111,6 +112,7 @@ void DbClientLockFree::execSql(
                 (_transSet.empty() || _transSet.find(conn) == _transSet.end()))
             {
                 conn->execSql(
+                    dbName,
                     std::move(sql),
                     paraNum,
                     std::move(parameters),
@@ -141,6 +143,7 @@ void DbClientLockFree::execSql(
                      _transSet.find(conn) == _transSet.end()))
                 {
                     conn->execSql(
+                        dbName,
                         std::move(sql),
                         paraNum,
                         std::move(parameters),
@@ -173,7 +176,8 @@ void DbClientLockFree::execSql(
                 if (_transSet.empty() ||
                     _transSet.find(conn) == _transSet.end())
                 {
-                    conn->execSql(std::move(sql),
+                    conn->execSql(dbName,
+                                  std::move(sql),
                                   paraNum,
                                   std::move(parameters),
                                   std::move(length),
@@ -204,6 +208,7 @@ void DbClientLockFree::execSql(
 
     // LOG_TRACE << "Push query to buffer";
     _sqlCmdBuffer.emplace_back(std::make_shared<SqlCmd>(
+        dbName,
         std::move(sql),
         paraNum,
         std::move(parameters),
@@ -320,7 +325,8 @@ void DbClientLockFree::handleNewTask(const DbConnectionPtr &conn)
         if (_type != ClientType::PostgreSQL)
         {
             auto &cmd = _sqlCmdBuffer.front();
-            conn->execSql(std::move(cmd->_sql),
+            conn->execSql(cmd->_dbName,
+                          std::move(cmd->_sql),
                           cmd->_paraNum,
                           std::move(cmd->_parameters),
                           std::move(cmd->_length),
@@ -338,7 +344,8 @@ void DbClientLockFree::handleNewTask(const DbConnectionPtr &conn)
         }
 #else
         auto &cmd = _sqlCmdBuffer.front();
-        conn->execSql(std::move(cmd->_sql),
+        conn->execSql(cmd->_dbName,
+                      std::move(cmd->_sql),
                       cmd->_paraNum,
                       std::move(cmd->_parameters),
                       std::move(cmd->_length),

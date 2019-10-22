@@ -70,11 +70,13 @@ MysqlConnection::MysqlConnection(trantor::EventLoop *loop,
         else if (key == "user")
         {
             user = value;
+            dbUser = user;
         }
         else if (key == "dbname")
         {
             // LOG_DEBUG << "database:[" << value << "]";
             dbname = value;
+            dbName = dbname;
         }
         else if (key == "port")
         {
@@ -83,6 +85,7 @@ MysqlConnection::MysqlConnection(trantor::EventLoop *loop,
         else if (key == "password")
         {
             passwd = value;
+            dbPwd = passwd;
         }
     }
     _loop->queueInLoop([=]() {
@@ -116,6 +119,23 @@ MysqlConnection::MysqlConnection(trantor::EventLoop *loop,
         _channelPtr->setEventCallback([=]() { handleEvent(); });
         setChannel();
     });
+}
+
+bool MysqlConnection::changeDb(const std::string &name)
+{
+    if (!name.empty() && name != dbName) 
+    {
+        if (mysql_change_user(_mysqlPtr.get(), dbUser.c_str(), dbPwd.c_str(), name.c_str()))
+        {
+            outputError();
+            return false;
+        }
+        else
+        {
+            dbName = name;
+        }
+    }
+    return true;
 }
 
 void MysqlConnection::setChannel()
@@ -244,6 +264,7 @@ void MysqlConnection::handleEvent()
 }
 
 void MysqlConnection::execSqlInLoop(
+    const std::string &name,
     std::string &&sql,
     size_t paraNum,
     std::vector<const char *> &&parameters,
@@ -252,7 +273,6 @@ void MysqlConnection::execSqlInLoop(
     ResultCallback &&rcb,
     std::function<void(const std::exception_ptr &)> &&exceptCallback)
 {
-    LOG_TRACE << sql;
     assert(paraNum == parameters.size());
     assert(paraNum == length.size());
     assert(paraNum == format.size());
@@ -265,13 +285,16 @@ void MysqlConnection::execSqlInLoop(
     _exceptCb = std::move(exceptCallback);
     _sql = sql;
 
-    LOG_TRACE << _sql;
-
+    if (!changeDb(name))
+    {
+        LOG_TRACE << "not change db\n";
+        return;
+    }
     // 生成参数绑定
     for(size_t i = 0; i< paraNum; i++)
         bind_param(parameters.at(i), i, format[i], length[i]);
 
-    LOG_TRACE << "prepare start";
+    LOG_DEBUG << "prepare sql on [" << name  << "]: " << _sql << '\n';
     
     if (!onEventPrepareStart()) return;
     setChannel();
@@ -281,15 +304,17 @@ void MysqlConnection::execSqlInLoop(
 void MysqlConnection::outputError()
 {
     _channelPtr->disableAll();
+    const char *err = mysql_error(_mysqlPtr.get());
+    if (!err[0]) return;
     LOG_ERROR << "Error(" << mysql_errno(_mysqlPtr.get()) << ") ["
               << mysql_sqlstate(_mysqlPtr.get()) << "] \""
-              << mysql_error(_mysqlPtr.get()) << "\"";
+              << err << "\"";
     if (_isWorking)
     {
         try
         {
             // TODO: exception type
-            throw SqlError(mysql_error(_mysqlPtr.get()), _sql);
+            throw SqlError(err, _sql);
         }
         catch (...)
         {
@@ -357,7 +382,6 @@ bool MysqlConnection::onEventPrepareStart()
             return false;        
     }
     _waitStatus = mysql_stmt_prepare_start(&err, _stmtPtr.get(), _sql.c_str(), _sql.length());
-    LOG_TRACE << "stmt_prepare_start:" << err;
     if (_waitStatus == 0)
     {
         if (err)
@@ -376,13 +400,12 @@ bool MysqlConnection::onEventPrepare(int status)
 {
     int err = 0;
     _waitStatus = mysql_stmt_prepare_cont(&err, _stmtPtr.get(), status);
-    LOG_TRACE << "stmt_prepare_cont:" << err;
     if (_waitStatus == 0)
     {
         if (err)
         {
             _execStatus = ExecStatus_None;
-            LOG_ERROR << "error:" << err << " status:" << status;
+            LOG_ERROR << "error:" << err;
             outputError();
             return false;
         }
@@ -400,7 +423,6 @@ bool MysqlConnection::onEventExecuteStart()
 
     int err = 0;
     _waitStatus = mysql_stmt_execute_start(&err, _stmtPtr.get());
-    LOG_TRACE << "stmt_execute_start:" << err;
     if (_waitStatus == 0)
     {
         if (err)
@@ -420,7 +442,6 @@ bool MysqlConnection::onEventExecute(int status)
 {
     int err = 0;
     _waitStatus = mysql_stmt_execute_cont(&err, _stmtPtr.get(), status);
-    LOG_TRACE << "stmt_execute:" << err;
     if (_waitStatus == 0)
     {
         if (err)
@@ -448,7 +469,6 @@ bool MysqlConnection::onEventResultStart()
 
     int err;
     _waitStatus = mysql_stmt_store_result_start(&err, _stmtPtr.get());
-    LOG_TRACE << "stmt_store_result_start:" << err;
     if (_waitStatus == 0)
     {
         if (err)
@@ -468,7 +488,6 @@ bool MysqlConnection::onEventResult(int status)
     //绑定结果
     int err;
     _waitStatus = mysql_stmt_store_result_cont(&err, _stmtPtr.get(), status);
-    LOG_TRACE << "stmt_store_result:" << err;
     if (_waitStatus == 0)
     {
         if (err)
@@ -495,19 +514,21 @@ bool MysqlConnection::onEventFetchRowStart()
 
     int err;
     _waitStatus = mysql_stmt_fetch_start(&err, _stmtPtr.get());
-    LOG_TRACE << "fetch_row_start!";
     if (_waitStatus == 0)
     {
         if (err == MYSQL_NO_DATA)
         {
+            LOG_DEBUG << "FETCH ROW END! " << _mysqlPtr.get()->db <<"\n";
             _execStatus = ExecStatus_None;
             getResult();
+            setChannel();
             return true;
         }
         else if (err)
         {
             LOG_ERROR << "error " << mysql_stmt_error(_stmtPtr.get());
             outputError();
+            setChannel();
             return false;
         }
         return onEventFetchRowStart();
@@ -520,7 +541,6 @@ bool MysqlConnection::onEventFetchRow(int status)
 {
     int err;
     _waitStatus = mysql_stmt_fetch_cont(&err, _stmtPtr.get(), status);
-    LOG_TRACE << "stmt_fetch_row:" << status;
     if (_waitStatus == 0)
     {
         if (err)

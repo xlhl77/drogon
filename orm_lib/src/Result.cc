@@ -159,7 +159,7 @@ int Result::oid(row_size_type column) const noexcept
     return _resultPtr->oid(column);
 }
 
-bool Result::toJson(json &result) noexcept
+bool Result::toJson(json &result) const noexcept
 {
     return _resultPtr->toJson(result);
 }
