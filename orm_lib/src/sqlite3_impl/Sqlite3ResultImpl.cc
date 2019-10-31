@@ -24,7 +24,7 @@ Result::size_type Sqlite3ResultImpl::size() const noexcept
 }
 Result::row_size_type Sqlite3ResultImpl::columns() const noexcept
 {
-    return _result.empty() ? 0 : _result[0].size();
+    return _result.empty() ? 0 : _columnNames.size();
 }
 const char *Sqlite3ResultImpl::columnName(row_size_type number) const
 {
@@ -50,20 +50,35 @@ Result::row_size_type Sqlite3ResultImpl::columnNumber(
 const char *Sqlite3ResultImpl::getValue(size_type row,
                                         row_size_type column) const
 {
-    auto col = _result[row][column];
-    return col ? col->c_str() : nullptr;
+    auto &col = _result[row][column];
+    return (col.type() == json::value_t::string) ? col.get_ref<const std::string&>().c_str() : col.dump().c_str();
 }
 bool Sqlite3ResultImpl::isNull(size_type row, row_size_type column) const
 {
-    return !_result[row][column];
+    return _result[row][column].is_null();
 }
 Result::field_size_type Sqlite3ResultImpl::getLength(size_type row,
                                                      row_size_type column) const
 {
-    auto col = _result[row][column];
-    return col ? col->length() : 0;
+    return strlen(getValue(row, column));
+    // auto col = _result[row][column];
+    // return col ? col->length() : 0;
 }
 unsigned long long Sqlite3ResultImpl::insertId() const noexcept
 {
     return _insertId;
+}
+bool Sqlite3ResultImpl::toJson(json &result) noexcept
+{
+    result = json::array();
+    int nRow = 0;
+    for (auto &row : _result)
+    {
+        for (auto i = 0; i < _columnNames.size(); i++)
+        {
+            result[nRow][_columnNames[i]] = row[i];
+        }
+        nRow++;
+    }
+    return true;
 }

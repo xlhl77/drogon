@@ -114,7 +114,8 @@ class MysqlConnection : public DbConnection,
     bool onEventExecuteStart();
     bool onEventResultStart();
     bool onEventFetchRowStart();
-
+    bool onEventQuery(int status);
+    bool onEventStoreResult(int status);
     void initResult();
 
     void bind_param(const char * param, size_t idx, int format, int length);
@@ -128,7 +129,7 @@ class MysqlConnection : public DbConnection,
     void handleClosed();
     void handleEvent();
     void setChannel();
-    void getResult();
+    void getResult(MYSQL_RES *res = nullptr);
     int _waitStatus;
     enum ExecStatus
     {
@@ -136,7 +137,9 @@ class MysqlConnection : public DbConnection,
         ExecStatus_Prepare,
         ExecStatus_Execute,
         ExecStatus_StoreResult,
-        ExecStatus_FetchRow
+        ExecStatus_FetchRow,
+        ExecStatus_RealQuery,
+        ExecStatus_Result
     };
     ExecStatus _execStatus = ExecStatus_None;
 
@@ -145,7 +148,6 @@ class MysqlConnection : public DbConnection,
     std::shared_ptr<MysqlResultImpl> _resultPtr = nullptr;
     std::string dbUser;
     std::string dbPwd;
-    std::string dbName;
 };
 
 }  // namespace orm

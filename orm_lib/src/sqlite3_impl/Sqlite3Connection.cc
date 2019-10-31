@@ -73,7 +73,17 @@ Sqlite3Connection::Sqlite3Connection(
             filename = value;
         }
     }
-    _loop->runInLoop([this, filename = std::move(filename)]() {
+
+    changeDb(filename);
+}
+
+bool Sqlite3Connection::changeDb(const std::string &dbName)
+{
+    if (dbName.empty() || dbName == _dbName)
+    {
+        return true;
+    }
+    _loop->runInLoop([this, filename = std::move(dbName)]() {
         sqlite3 *tmp = nullptr;
         auto ret = sqlite3_open(filename.data(), &tmp);
         _conn = std::shared_ptr<sqlite3>(tmp, [=](sqlite3 *ptr) {
@@ -87,13 +97,16 @@ Sqlite3Connection::Sqlite3Connection(
         }
         else
         {
+            _dbName = filename;
             sqlite3_extended_result_codes(tmp, true);
             _okCb(thisPtr);
         }
     });
+    return true;
 }
 
 void Sqlite3Connection::execSql(
+    const std::string& name,
     std::string &&sql,
     size_t paraNum,
     std::vector<const char *> &&parameters,
@@ -273,35 +286,42 @@ int Sqlite3Connection::stmtStep(
     int r;
     while ((r = sqlite3_step(stmt)) == SQLITE_ROW)
     {
-        std::vector<std::shared_ptr<std::string>> row;
+        json row = json::array();
         for (int i = 0; i < columnNum; i++)
         {
             switch (sqlite3_column_type(stmt, i))
             {
                 case SQLITE_INTEGER:
-                    row.push_back(std::make_shared<std::string>(
-                        std::to_string(sqlite3_column_int64(stmt, i))));
+                    row[i] = sqlite3_column_int64(stmt, i);
+                    // row.push_back(std::make_shared<std::string>(
+                    //     std::to_string(sqlite3_column_int64(stmt, i))));
                     break;
                 case SQLITE_FLOAT:
-                    row.push_back(std::make_shared<std::string>(
-                        std::to_string(sqlite3_column_double(stmt, i))));
+                    row[i] = sqlite3_column_double(stmt, i);
+                    // row.push_back(std::make_shared<std::string>(
+                    //     std::to_string(sqlite3_column_double(stmt, i))));
                     break;
                 case SQLITE_TEXT:
-                    row.push_back(std::make_shared<std::string>(
+                    row[i] = std::string(
                         (const char *)sqlite3_column_text(stmt, i),
-                        (size_t)sqlite3_column_bytes(stmt, i)));
+                        (size_t)sqlite3_column_bytes(stmt, i));
+                    // row.push_back(std::make_shared<std::string>(
+                    //     (const char *)sqlite3_column_text(stmt, i),
+                    //     (size_t)sqlite3_column_bytes(stmt, i)));
                     break;
                 case SQLITE_BLOB:
                 {
                     const char *buf =
                         (const char *)sqlite3_column_blob(stmt, i);
                     size_t len = sqlite3_column_bytes(stmt, i);
-                    row.push_back(buf ? std::make_shared<std::string>(buf, len)
-                                      : std::make_shared<std::string>());
+                    row[i] = buf ? std::string(buf, len)
+                                      : std::string();                    
+                    // row.push_back(buf ? std::make_shared<std::string>(buf, len)
+                    //                   : std::make_shared<std::string>());
                 }
                 break;
                 case SQLITE_NULL:
-                    row.push_back(nullptr);
+                    row[i] = json();
                     break;
             }
         }

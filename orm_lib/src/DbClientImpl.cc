@@ -187,7 +187,8 @@ void DbClientImpl::execSql(
             {
                 // LOG_TRACE << "Push query to buffer";
                 std::shared_ptr<SqlCmd> cmd =
-                    std::make_shared<SqlCmd>(std::move(sql),
+                    std::make_shared<SqlCmd>(dbName,
+                                             std::move(sql),
                                              paraNum,
                                              std::move(parameters),
                                              std::move(length),
@@ -199,10 +200,24 @@ void DbClientImpl::execSql(
         }
         else
         {
-            auto iter = _readyConnections.begin();
-            _busyConnections.insert(*iter);
-            conn = *iter;
-            _readyConnections.erase(iter);
+            // 选择一个连接，优先选择打开了同一个数据库的
+            for (auto it = _readyConnections.begin(); it != _readyConnections.end(); it++)
+            {
+                if (dbName == (*it)->getCurrentDb())
+                {
+                    conn = *it;
+                    _busyConnections.insert(*it);
+                    _readyConnections.erase(it);
+                    break;
+                }
+            }
+            if (!conn)
+            {
+                auto iter = _readyConnections.begin();
+                _busyConnections.insert(*iter);
+                conn = *iter;
+                _readyConnections.erase(iter);
+            }
         }
     }
     if (conn)
@@ -241,7 +256,7 @@ void DbClientImpl::execSql(
                                  std::move(rcb),
                                  std::move(exceptCallback));
     {
-        std::lock_guard<std::mutex> guard(_bufferMutex);
+        // std::lock_guard<std::mutex> guard(_bufferMutex);
         _sqlCmdBuffer.push_back(std::move(cmd));
     }
 }

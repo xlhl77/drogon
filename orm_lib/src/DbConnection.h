@@ -130,6 +130,10 @@ class DbConnection : public trantor::NonCopyable
     {
         return _isWorking;
     }
+    const std::string &getCurrentDb()
+    {
+        return _dbName;
+    }
 
   protected:
     QueryCallback _cb;
@@ -141,6 +145,7 @@ class DbConnection : public trantor::NonCopyable
     std::function<void(const std::exception_ptr &)> _exceptCb;
     bool _isWorking = false;
     std::string _sql = "";
+    std::string _dbName = "";
 };
 
 }  // namespace orm

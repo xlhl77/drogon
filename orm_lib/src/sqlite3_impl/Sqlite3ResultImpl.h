@@ -44,10 +44,11 @@ class Sqlite3ResultImpl : public ResultImpl
     virtual field_size_type getLength(size_type row,
                                       row_size_type column) const override;
     virtual unsigned long long insertId() const noexcept override;
+    virtual bool toJson(json &result) noexcept override;
 
   private:
     friend class Sqlite3Connection;
-    std::vector<std::vector<std::shared_ptr<std::string>>> _result;
+    json _result;
     std::string _query;
     std::vector<std::string> _columnNames;
     std::unordered_map<std::string, size_t> _columnNameMap;

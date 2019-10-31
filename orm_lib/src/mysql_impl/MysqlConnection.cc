@@ -76,7 +76,7 @@ MysqlConnection::MysqlConnection(trantor::EventLoop *loop,
         {
             // LOG_DEBUG << "database:[" << value << "]";
             dbname = value;
-            dbName = dbname;
+            _dbName = dbname;
         }
         else if (key == "port")
         {
@@ -123,7 +123,7 @@ MysqlConnection::MysqlConnection(trantor::EventLoop *loop,
 
 bool MysqlConnection::changeDb(const std::string &name)
 {
-    if (!name.empty() && name != dbName) 
+    if (!name.empty() && name != _dbName) 
     {
         if (mysql_change_user(_mysqlPtr.get(), dbUser.c_str(), dbPwd.c_str(), name.c_str()))
         {
@@ -132,7 +132,7 @@ bool MysqlConnection::changeDb(const std::string &name)
         }
         else
         {
-            dbName = name;
+            _dbName = name;
         }
     }
     return true;
@@ -226,6 +226,18 @@ void MysqlConnection::handleEvent()
     {
         switch (_execStatus)
         {
+        case ExecStatus_RealQuery:
+        {
+            onEventQuery(status);
+            setChannel();
+            return;
+        }
+        case ExecStatus_Result:
+        {
+            onEventStoreResult(status);
+            setChannel();
+            return;
+        }
         case ExecStatus_Prepare:
         {
             onEventPrepare(status);
@@ -290,15 +302,120 @@ void MysqlConnection::execSqlInLoop(
         LOG_TRACE << "not change db\n";
         return;
     }
-    // 生成参数绑定
-    for(size_t i = 0; i< paraNum; i++)
-        bind_param(parameters.at(i), i, format[i], length[i]);
+    std::string dml = "sSiIuUdD";
+    if (dml.find(_sql[0]) != std::string::npos)
+    {
+        // 生成参数绑定
+        for(size_t i = 0; i< paraNum; i++)
+            bind_param(parameters.at(i), i, format[i], length[i]);
 
-    LOG_DEBUG << "prepare sql on [" << name  << "]: " << _sql << '\n';
-    
-    if (!onEventPrepareStart()) return;
+        LOG_DEBUG << "prepare sql on [" << name  << "]: " << _sql << '\n';
+        
+        if (!onEventPrepareStart()) return;
+        setChannel();
+        return;
+    }
+
+    if (paraNum > 0)
+    {
+        std::string::size_type pos = 0;
+        std::string::size_type seekPos = std::string::npos;
+        for (size_t i = 0; i < paraNum; i++)
+        {
+            seekPos = sql.find("?", pos);
+            if (seekPos == std::string::npos)
+            {
+                _sql.append(sql.substr(pos));
+                pos = seekPos;
+                break;
+            }
+            else
+            {
+                _sql.append(sql.substr(pos, seekPos - pos));
+                pos = seekPos + 1;
+                switch (format[i])
+                {
+                    case MYSQL_TYPE_TINY:
+                        _sql.append(std::to_string(*((char *)parameters[i])));
+                        break;
+                    case MYSQL_TYPE_SHORT:
+                        _sql.append(std::to_string(*((short *)parameters[i])));
+                        break;
+                    case MYSQL_TYPE_LONG:
+                        _sql.append(
+                            std::to_string(*((int32_t *)parameters[i])));
+                        break;
+                    case MYSQL_TYPE_LONGLONG:
+                        _sql.append(
+                            std::to_string(*((int64_t *)parameters[i])));
+                        break;
+                    case MYSQL_TYPE_NULL:
+                        _sql.append("NULL");
+                        break;
+                    case MYSQL_TYPE_STRING:
+                    {
+                        _sql.append("'");
+                        std::string to(length[i] * 2, '\0');
+                        auto len = mysql_real_escape_string(_mysqlPtr.get(),
+                                                            (char *)to.c_str(),
+                                                            parameters[i],
+                                                            length[i]);
+                        to.resize(len);
+                        _sql.append(to);
+                        _sql.append("'");
+                    }
+                    break;
+                    default:
+                        break;
+                }
+            }
+        }
+        if (pos < sql.length())
+        {
+            _sql.append(sql.substr(pos));
+        }
+    }
+    else
+    {
+        _sql = sql;
+    }
+    LOG_TRACE << _sql;
+    int err;
+    // int mysql_real_query_start(int *ret, MYSQL *mysql, const char *q,
+    // unsigned long length)
+    _waitStatus = mysql_real_query_start(&err,
+                                         _mysqlPtr.get(),
+                                         _sql.c_str(),
+                                         _sql.length());
+    LOG_TRACE << "real_query:" << _waitStatus;
+    _execStatus = ExecStatus_RealQuery;
+    if (_waitStatus == 0)
+    {
+        if (err)
+        {
+            LOG_ERROR << "error";
+            outputError();
+            return;
+        }
+
+        MYSQL_RES *ret;
+        _waitStatus = mysql_store_result_start(&ret, _mysqlPtr.get());
+        LOG_TRACE << "store_result:" << _waitStatus;
+        _execStatus = ExecStatus_Result;
+        if (_waitStatus == 0)
+        {
+            _execStatus = ExecStatus_None;
+            if (!ret)
+            {
+                LOG_ERROR << "error";
+                outputError();
+                return;
+            }
+            getResult(ret);
+        }
+    }
     setChannel();
-    return;
+    return;    
 }
 
 void MysqlConnection::outputError()
@@ -328,8 +445,16 @@ void MysqlConnection::outputError()
     }
 }
 
-void MysqlConnection::getResult()
+void MysqlConnection::getResult(MYSQL_RES *res)
 {
+    if (res)
+        _resultPtr = std::make_shared<MysqlResultImpl>(
+            std::shared_ptr<MYSQL_RES>(res, [](MYSQL_RES *r) {
+                mysql_free_result(r);
+            }),
+            _sql,
+            mysql_affected_rows(_mysqlPtr.get()),
+            mysql_insert_id(_mysqlPtr.get()));    
     // mysql_stmt_affected_rows(_stmtPtr.get()), mysql_stmt_insert_id(_stmtPtr.get()));
     if (_isWorking)
     {
@@ -365,6 +490,61 @@ bool MysqlConnection::onEventConnect(int status)
             _okCb(thisPtr);
         }
     }
+    return true;
+}
+
+bool MysqlConnection::onEventQuery(int status)
+{
+    int err = 0;
+    _waitStatus =
+        mysql_real_query_cont(&err, _mysqlPtr.get(), status);
+    LOG_TRACE << "real_query:" << _waitStatus;
+    if (_waitStatus == 0)
+    {
+        if (err)
+        {
+            _execStatus = ExecStatus_None;
+            LOG_ERROR << "error:" << err << " status:" << status;
+            outputError();
+            return false;
+        }
+        _execStatus = ExecStatus_Result;
+        MYSQL_RES *ret;
+        _waitStatus =
+            mysql_store_result_start(&ret, _mysqlPtr.get());
+        LOG_TRACE << "store_result_start:" << _waitStatus;
+        if (_waitStatus == 0)
+        {
+            _execStatus = ExecStatus_None;
+            if (err)
+            {
+                LOG_ERROR << "error";
+                outputError();
+                return false;
+            }
+            getResult(ret);
+        }
+    }
+    return true;
+}
+bool MysqlConnection::onEventStoreResult(int status)
+{
+    MYSQL_RES *ret;
+    _waitStatus =
+        mysql_store_result_cont(&ret, _mysqlPtr.get(), status);
+    LOG_TRACE << "store_result:" << _waitStatus;
+    if (_waitStatus == 0)
+    {
+        if (!ret)
+        {
+            _execStatus = ExecStatus_None;
+            LOG_ERROR << "error";
+            outputError();
+            return false;
+        }
+        getResult(ret);
+    }
+    setChannel();
     return true;
 }
 
@@ -405,7 +585,7 @@ bool MysqlConnection::onEventPrepare(int status)
         if (err)
         {
             _execStatus = ExecStatus_None;
-            LOG_ERROR << "error:" << err;
+            LOG_ERROR << "error:" << _sql;
             outputError();
             return false;
         }

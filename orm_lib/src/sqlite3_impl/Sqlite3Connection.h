@@ -27,7 +27,8 @@
 #include <trantor/net/EventLoopThread.h>
 #include <trantor/utils/NonCopyable.h>
 #include <trantor/utils/SerialTaskQueue.h>
-
+#include <drogon/utils/json.hpp>
+using namespace nlohmann;
 namespace drogon
 {
 namespace orm
@@ -41,8 +42,9 @@ class Sqlite3Connection : public DbConnection,
     Sqlite3Connection(trantor::EventLoop *loop,
                       const std::string &connInfo,
                       const std::shared_ptr<SharedMutex> &sharedMutex);
-
-    virtual void execSql(std::string &&sql,
+    virtual bool changeDb(const std::string &dbName) override;
+    virtual void execSql(const std::string &name,
+                         std::string &&sql,
                          size_t paraNum,
                          std::vector<const char *> &&parameters,
                          std::vector<int> &&length,
